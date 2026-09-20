@@ -49,8 +49,8 @@ struct TutorialView: View {
         }
         .navigationTitle("教程")
         .navigationDestination(for: TutorialCase.self) { tutorialCase in
-            // 阶数变化时整个详情页重建，模型按新阶摆案型
-            TutorialCaseDetailView(tutorialCase: tutorialCase)
+            // 阶数变化时整个详情页重建：init 按新阶新建场景，动画作用于上屏的那个场景
+            TutorialCaseDetailView(tutorialCase: tutorialCase, cubeSize: cubeSize)
                 .id(cubeSize)
         }
     }
@@ -60,10 +60,18 @@ struct TutorialView: View {
 
 struct TutorialCaseDetailView: View {
     let tutorialCase: TutorialCase
+    let cubeSize: Int
 
-    @AppStorage(CubeSize.defaultsKey) private var cubeSize = 3
-    @State private var model = TutorialCubeModel()
+    @State private var model: TutorialCubeModel
     @State private var orbit = CubeScene.defaultOrbit
+
+    init(tutorialCase: TutorialCase, cubeSize: Int) {
+        self.tutorialCase = tutorialCase
+        self.cubeSize = cubeSize
+        // 模型（含场景）在视图创建时按阶数生成：RealityView 的 make 只跑一次，
+        // 之后换 model 实例不会重新上屏，所以绝不能在 onAppear 里另建模型
+        _model = State(initialValue: TutorialCubeModel(state: .solved(size: cubeSize)))
+    }
 
     private var algorithm: Algorithm? { tutorialCase.algorithm(size: cubeSize) }
 
@@ -125,7 +133,6 @@ struct TutorialCaseDetailView: View {
         .navigationTitle(tutorialCase.name)
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
-            model = TutorialCubeModel(state: .solved(size: cubeSize))
             orbit = CubeScene.defaultOrbit
             if let algorithm { model.loadCase(algorithm: algorithm) }
         }

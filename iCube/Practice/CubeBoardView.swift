@@ -20,6 +20,8 @@ struct CubeBoardView: View {
         var intent: CubeScene.DragIntent = .undecided
         var handle: CubeScene.TurnHandle?
         var angle: Float = 0
+        /// 已跨过的 90° 格数（带符号），用于拖拽中逐格“咔哒”
+        var lastSnapQuarter = 0
 
         init(id: Int, start: CGPoint, hit: CubeScene.Hit?) {
             self.id = id
@@ -161,6 +163,12 @@ struct CubeBoardView: View {
             guard let handle = finger.handle else { return }
             finger.angle = scene.angle(for: plan, drag: drag)
             scene.updateDragAngle(handle, finger.angle)
+            // 拖拽中每跨过一格 90° 响一声（像真魔方的棘轮感）
+            let quarter = Int((finger.angle / (Float.pi / 2)).rounded())
+            if quarter != finger.lastSnapQuarter {
+                finger.lastSnapQuarter = quarter
+                TurnSoundPlayer.shared.play()
+            }
         case .orbit:
             driveOrbit(step: step, ownerID: finger.id)
         }
@@ -178,6 +186,12 @@ struct CubeBoardView: View {
         let flick = CGSize(width: drag.width * 1.6, height: drag.height * 1.6)
         let predicted = scene.angle(for: plan, drag: flick)
         let angle = abs(predicted) > abs(finger.angle) ? predicted : finger.angle
+        // 甩动直接跳过中途 90° 时，落定格补一声
+        let quarter = Int((angle / (Float.pi / 2)).rounded())
+        if quarter != finger.lastSnapQuarter {
+            finger.lastSnapQuarter = quarter
+            TurnSoundPlayer.shared.play()
+        }
         scene.endDrag(handle: handle, angle: angle) { committed in
             if let committed {
                 model.registerUserMove(committed)

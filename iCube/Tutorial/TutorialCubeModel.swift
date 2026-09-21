@@ -55,6 +55,7 @@ final class TutorialCubeModel {
             for (index, move) in algorithm.moves.enumerated() {
                 guard let self, !Task.isCancelled else { break }
                 currentMoveIndex = index
+                TurnSoundPlayer.shared.play()
                 await scene.play(move, duration: duration)
                 guard !Task.isCancelled else { break }
                 state.apply(move)

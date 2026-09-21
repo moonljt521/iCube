@@ -7,6 +7,7 @@ struct PracticeView: View {
     @Environment(\.modelContext) private var context
     @Query(sort: \SolveRecord.startedAt, order: .reverse) private var records: [SolveRecord]
     @AppStorage(MaterialCache.defaultsKey) private var skinID = CubeSkin.classic.id
+    @AppStorage(TurnSoundPlayer.defaultsKey) private var soundOn = true
 
     var body: some View {
         VStack(spacing: 12) {
@@ -48,6 +49,10 @@ struct PracticeView: View {
                         Label(skin.name, systemImage: "paintpalette")
                             .tag(skin.id)
                     }
+                }
+                Divider()
+                Toggle(isOn: $soundOn) {
+                    Label("转动音效", systemImage: soundOn ? "speaker.wave.2" : "speaker.slash")
                 }
             } label: {
                 Image(systemName: "slider.horizontal.3")

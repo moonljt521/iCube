@@ -51,7 +51,7 @@ CubeKit 是与应用层完全解耦的纯 Swift 算法包，无 UIKit / RealityK
 
 - **手势仲裁**：基于 raycast 命中结果的会话式多指手势追踪——贴纸命中转层、轮廓外旋转视角、空白双指捏合缩放，三者互不打断
 - **场景复用**：同阶状态变化走场景内重建，换阶重建整个场景；材质按皮肤分桶缓存，换肤零重建成本
-- **碰撞体约束**：贴纸碰撞体采用"整格覆盖、与表面齐平"策略，规避透视下误触 neighbouring 面的经典问题
+- **碰撞体约束**：贴纸碰撞体采用"整格覆盖、与表面齐平"策略，规避透视下误触邻面的经典问题
 
 ## 工程结构
 
@@ -66,8 +66,22 @@ iCube/
 │   ├── Tutorial/            # 教程：数据、演示模型、界面
 │   ├── Stats/               # 成绩记录与统计
 │   └── Assets.xcassets/     # App 图标等资源
-└── iCubeTests/              # 应用层单元测试（38 条）
+├── iCubeTests/              # 应用层单元测试（40 条）
+└── Tools/                   # 资源生成脚本（见下）
 ```
+
+### 重新生成资源
+
+```bash
+# App 图标（1024px PNG）——产物与已入库的图标逐字节一致
+swift Tools/make_icon.swift iCube/Assets.xcassets/AppIcon.appiconset/AppIcon.png
+
+# 转动音效——注意：该脚本已被取代，详见脚本头部说明
+swift Tools/make_sounds.swift <输出目录>
+```
+
+`make_icon.swift` 是现行图标的生成器。`make_sounds.swift` 仅作历史参考保留：
+App 内三条 `turn_*.wav` 取自真实磁吸魔方录音，**无法**由该脚本复现。
 
 ## 快速开始
 

@@ -7,3 +7,4 @@ CubeKit/.build/
 CubeKit/Package.resolved
 *.xcscmblueprint
 iCube.xcodeproj/
+.workbuddy-ai/

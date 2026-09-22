@@ -66,8 +66,23 @@ iCube/
 │   ├── Tutorial/            # Tutorial: data, demo model, views
 │   ├── Stats/               # Solve records and statistics
 │   └── Assets.xcassets/     # App icon and other assets
-└── iCubeTests/              # App-layer unit tests (38 tests)
+├── iCubeTests/              # App-layer unit tests (40 tests)
+└── Tools/                   # Asset generation scripts (see below)
 ```
+
+### Regenerating assets
+
+```bash
+# App icon (1024px PNG) — output is byte-identical to the committed asset
+swift Tools/make_icon.swift iCube/Assets.xcassets/AppIcon.appiconset/AppIcon.png
+
+# Turn sound effects — NOTE: superseded, see the header of the script
+swift Tools/make_sounds.swift <output-dir>
+```
+
+`make_icon.swift` is the live generator for the shipped icon. `make_sounds.swift` is
+kept for historical reference only: the three `turn_*.wav` files in the app were taken
+from a real magnetic-cube recording and are **not** reproducible from this script.
 
 ## Getting Started
 
@@ -112,7 +127,7 @@ xcodebuild test -project iCube.xcodeproj -scheme iCube \
 ## Testing Strategy
 
 - **CubeKit (79 tests)**: geometry and sticker-index invariants, turn-permutation correctness across all supported sizes, notation parse round-trips, size-dependent wide-move semantics, scramble solvability and interval rules, color-count conservation under random multi-size turning
-- **App layer (38 tests)**: gesture intent arbitration (including back-facing hit filtering), scene construction and sticker reconciliation, per-case tutorial validation, and the practice-session state machine
+- **App layer (40 tests)**: gesture intent arbitration (including back-facing hit filtering), scene construction and sticker reconciliation, per-case tutorial validation, and the practice-session state machine
 
 ## Implementation Notes
 

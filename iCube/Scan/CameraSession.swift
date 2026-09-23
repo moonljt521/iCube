@@ -48,7 +48,7 @@ final class CameraSession: NSObject {
             if !isConfigured && !isFailed {
                 if let failure = configure() {
                     isFailed = true
-                    DispatchQueue.main.async { onFailure?(failure) }
+                    DispatchQueue.main.async { self.onFailure?(failure) }
                     return
                 }
             }

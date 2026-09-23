@@ -49,6 +49,13 @@ final class CubeScene {
     }
 
     /// 进行中的一层转动（拖拽与脚本播放共用）
+    ///
+    /// 显式标 `@MainActor`：嵌套类型**不继承**外层类型的 actor 隔离，而这里的
+    /// `pivot` 要在属性初始化时构造 `Entity()`，那个构造器是主 actor 隔离的。
+    /// 不标的话编译期会报 "call to main actor-isolated initializer 'init()'
+    /// in a synchronous nonisolated context"——运行时没事（这个类只在
+    /// `CubeScene` 内部用，而 `CubeScene` 是 `@MainActor`），但警告一直在。
+    @MainActor
     private final class ActiveTurn {
         let axis: CubeAxis
         let signedAxis: V3

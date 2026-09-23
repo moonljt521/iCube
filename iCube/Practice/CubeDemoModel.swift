@@ -67,6 +67,8 @@ final class CubeDemoModel {
                 guard !Task.isCancelled else { break }
                 state.apply(move)
             }
+            // 循环里那次 `guard let self` 只作用于循环体，这里得再解一次
+            guard let self else { return }
             if !Task.isCancelled { currentMoveIndex = nil }
             isPlaying = false
         }

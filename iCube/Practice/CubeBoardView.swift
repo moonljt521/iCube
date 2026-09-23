@@ -108,6 +108,10 @@ struct CubeBoardView: View {
                 tracker.fingers[event.id] = nil
                 if tracker.orbitFingerID == event.id { tracker.orbitFingerID = nil }
                 finish(finger, event: event, scene: scene)
+            @unknown default:
+                // `UITouch.Phase` 是 Objective-C 的 NS_ENUM，将来可能加新值。
+                // 未知阶段当无事发生，比漏掉一个分支去误判手势强。
+                continue
             }
         }
         updatePinch()

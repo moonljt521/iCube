@@ -41,6 +41,11 @@ targets:
         MARKETING_VERSION: "1.0"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         SUPPORTS_MACCATALYST: NO
+        # 顶层 settings.base 里那份会被 xcodegen 对 iOS target 注入的默认值
+        # "1,2" 覆盖掉（target 级优先于项目级），所以这里必须再声明一次。
+        # 只声明竖屏又不带 UIRequiresFullScreen 时，多出来的 iPad 支持会触发
+        # "All interface orientations must be supported" 警告。
+        TARGETED_DEVICE_FAMILY: "1"
     dependencies:
       - package: CubeKit
       - package: CubeSolve
@@ -55,6 +60,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.moonding.icube.tests
         GENERATE_INFOPLIST_FILE: YES
+        TARGETED_DEVICE_FAMILY: "1"
     dependencies:
       - target: iCube
       - package: CubeKit

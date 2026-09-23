@@ -5,16 +5,19 @@ import CubeSolve
 /// 还原功能的入口容器：录入 → 求解 → 步骤。
 ///
 /// 以全屏 cover 从练习页拉起，而不是新开 Tab——功能内聚，也不占 Tab 位。
-/// 后续接入拍照时，拍照页会作为录入页的另一种输入方式挂在这里面。
+/// 录入有两条路：手动点格子，或者拍照识别。拍照那条走 `ScanView`，
+/// 认出来的状态灌进同一个 `RestoreModel`，回到录入页给用户复核——识别再准
+/// 也可能有光线捣乱，最后一眼必须由人过。
 struct RestoreView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var model = RestoreModel()
     @State private var path: [SolutionPayload] = []
+    @State private var isScanning = false
 
     var body: some View {
         NavigationStack(path: $path) {
-            FaceEntryView(model: model) { state, solution in
+            FaceEntryView(model: model, onScan: { isScanning = true }) { state, solution in
                 path.append(SolutionPayload(state: state, solution: solution))
             }
             .navigationTitle("还原")
@@ -29,6 +32,11 @@ struct RestoreView: View {
             }
         }
         .tint(.orange)
+        .fullScreenCover(isPresented: $isScanning) {
+            ScanView { state in
+                model.load(state: state)
+            }
+        }
     }
 }
 

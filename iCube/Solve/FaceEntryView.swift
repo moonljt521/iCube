@@ -9,10 +9,12 @@ import CubeSolve
 /// "拖着刷"是同一条代码路径，不必给 54 个格子各挂手势，连续涂抹也不会漏格。
 struct FaceEntryView: View {
     let model: RestoreModel
+    let onScan: () -> Void
     let onSolved: (CubeState, CubeSolution) -> Void
 
     var body: some View {
         VStack(spacing: 14) {
+            scanEntry
             hint
             Spacer(minLength: 0)
             editor
@@ -26,10 +28,43 @@ struct FaceEntryView: View {
         .background(Color(white: 0.05).ignoresSafeArea())
     }
 
+    // MARK: - 拍照入口
+
+    private var scanEntry: some View {
+        Button(action: onScan) {
+            HStack(spacing: 10) {
+                Image(systemName: "camera.viewfinder")
+                    .font(.system(size: 20))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("拍照识别")
+                        .font(.subheadline.weight(.semibold))
+                    Text("六个面各拍一张，自动读出当前状态")
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.7))
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.5))
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.white)
+        .background(Color.orange.opacity(0.22), in: RoundedRectangle(cornerRadius: 12))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(Color.orange.opacity(0.5), lineWidth: 1)
+        }
+        .padding(.top, 4)
+    }
+
     // MARK: - 说明
 
     private var hint: some View {
-        Text("把魔方按 白顶 · 绿前 摆好，照展开图逐格填色。六个中心块已按标准配色填好，可以改。")
+        Text("也可以照展开图逐格填色。魔方按 白顶 · 绿前 摆好，六个中心块已按标准配色填好。")
             .font(.footnote)
             .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity, alignment: .leading)

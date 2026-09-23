@@ -21,6 +21,8 @@ packages:
     path: CubeKit
   CubeSolve:
     path: CubeSolve
+  CubeScan:
+    path: CubeScan
 
 targets:
   iCube:
@@ -42,6 +44,7 @@ targets:
     dependencies:
       - package: CubeKit
       - package: CubeSolve
+      - package: CubeScan
 
   iCubeTests:
     type: bundle.unit-test
@@ -56,3 +59,4 @@ targets:
       - target: iCube
       - package: CubeKit
       - package: CubeSolve
+      - package: CubeScan

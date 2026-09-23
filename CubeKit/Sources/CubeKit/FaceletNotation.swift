@@ -73,7 +73,7 @@ public extension CubeState {
     /// 长度不是 54、或含非法字符时返回 nil。
     ///
     /// 注意：这里**只做格式解析，不校验状态是否合法**（每色是否恰好 9 个、
-    /// 棱角朝向与奇偶性等）。合法性请用 `isLegalState`。
+    /// 棱角朝向与奇偶性等）。合法性请用 `CubeState.isLegalState`。
     init?(faceletString: String) {
         let chars = Array(faceletString)
         guard chars.count == FaceletNotation.length else { return nil }

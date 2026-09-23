@@ -67,6 +67,8 @@ struct ScanView: View {
         case .unavailable:
             placeholder("这台设备没有可用的后置摄像头。用「手动录入」一样可以还原。",
                         systemImage: "camera.metering.unknown")
+        case .cameraFailed(let message):
+            placeholder(message, systemImage: "exclamationmark.triangle")
         default:
             VStack(spacing: 16) {
                 viewfinder

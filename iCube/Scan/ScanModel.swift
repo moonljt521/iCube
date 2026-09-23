@@ -34,6 +34,18 @@ extension ScanError {
     }
 }
 
+extension CameraSession.Failure {
+    /// 给用户看的中文说明。
+    var userMessage: String {
+        switch self {
+        case .cannotCreateInput:
+            "打不开后置摄像头。别的 App 可能正在用它——关掉之后退出本页重进即可，也可以直接手动录入。"
+        case .cannotAddInput, .cannotAddOutput:
+            "相机初始化失败。退出本页重进即可，也可以直接手动录入。"
+        }
+    }
+}
+
 /// 拍照还原的编排：管相机、管采样、管"六个面凑齐后跑识别"。
 ///
 /// 颜色怎么分、朝向怎么摆，全部在 `CubeScan` 里（纯算法、有单测）；这里只负责
@@ -52,6 +64,8 @@ final class ScanModel {
         case denied
         /// 这台设备没有可用后置摄像头（模拟器）
         case unavailable
+        /// 相机起不来（会话配置失败）
+        case cameraFailed(String)
         /// 正在拍
         case scanning
         /// 六个面齐了，正在识别
@@ -115,6 +129,14 @@ final class ScanModel {
     private func beginRunning() {
         camera.onFrame = { [weak self] buffer in
             self?.handleFrame(buffer)
+        }
+        // 会话配置失败必须报到界面上。否则表现是"黑屏 + 快门永远点不动"，
+        // 用户完全无从判断是卡住了还是坏了。
+        camera.onFailure = { [weak self] failure in
+            Task { @MainActor [weak self] in
+                guard let self, self.phase != .analysing else { return }
+                self.phase = .cameraFailed(failure.userMessage)
+            }
         }
         camera.start()
         if phase != .analysing { phase = .scanning }

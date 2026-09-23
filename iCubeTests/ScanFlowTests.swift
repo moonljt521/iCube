@@ -61,4 +61,22 @@ final class ScanFlowTests: XCTestCase {
             }
         }
     }
+
+    /// 把握度提醒的阈值边界：够有把握必须给 nil，低于阈值必须给话。
+    ///
+    /// 提醒只提示不拦截，所以这里钉的是"什么时候说话"——说多了会变成噪音，
+    /// 说少了等于没接。
+    func test_confidenceHintOnlyFiresBelowThreshold() {
+        let threshold = ClassifiedFaces.lowConfidenceThreshold
+
+        XCTAssertNil(ScanModel.confidenceHint(margin: threshold),
+                     "恰好等于阈值不该提醒——语义是「低于才提醒」")
+        XCTAssertNil(ScanModel.confidenceHint(margin: threshold + 1),
+                     "明显有把握却给了提醒，会变成天天弹的噪音")
+
+        let hint = ScanModel.confidenceHint(margin: 2.5)
+        XCTAssertNotNil(hint, "低于阈值却没提醒，这个信号等于白算")
+        XCTAssertTrue(hint?.contains("2.5") == true,
+                      "提醒里没带把握度数值，用户不知道差多少：\(hint ?? "nil")")
+    }
 }

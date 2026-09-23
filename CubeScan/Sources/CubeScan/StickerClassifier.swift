@@ -25,8 +25,15 @@ public struct ClassifiedFaces: Hashable, Sendable {
     public let colors: [Face: [CubeColor]]
 
     /// 把握程度：所有样本"到本簇距离"与"到次近簇距离"之差的最小十分位（Lab 单位）。
-    /// 越小说明越有样本骑在两个颜色中间。低于 4 左右就该重拍。
+    /// 越小说明越有样本骑在两个颜色中间。低于 `lowConfidenceThreshold` 就该重拍。
     public let margin: Double
+
+    /// `margin` 低于这个值，这次识别的把握就不够。
+    ///
+    /// 取 4：干净输入（合成、日光）实测 margin 大于 15，留了足够余量；低到 4 以下说明
+    /// 确实有格子骑在两个颜色中间。这里只给判据，**不替调用方决定**是拦下重拍还是
+    /// 只提示一句——把握度低不等于结果一定错，那是应用层该权衡的事。
+    public static let lowConfidenceThreshold: Double = 4
 }
 
 public enum ScanError: Error, Equatable, Sendable {

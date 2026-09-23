@@ -187,4 +187,53 @@ final class StickerClassifierTests: XCTestCase {
         XCTAssertEqual(result.colors[target.face]?[target.position], .green,
                        "硬约束没把骑墙的那一格拽回绿色")
     }
+
+    /// 阈值不能定得太高，否则干净输入也会天天弹"把握不大"。
+    func test_lowConfidenceThresholdDoesNotFireOnCleanInput() throws {
+        for seed in UInt64(1)...10 {
+            let result = try StickerClassifier.classify(SyntheticCapture.captures(
+                of: state(seed: seed),
+                rotations: SyntheticCapture.randomRotations(seed: seed),
+                seed: seed
+            ))
+            XCTAssertGreaterThan(
+                result.margin, ClassifiedFaces.lowConfidenceThreshold,
+                "seed \(seed)：干净输入被判成把握不够（margin \(result.margin)），阈值定高了"
+            )
+        }
+    }
+
+    /// 反过来，真有格子骑在两个颜色中间时，margin 必须掉到阈值以下——否则提醒形同虚设。
+    ///
+    /// 把绿贴纸全推到"绿蓝正中"：每格到绿簇与蓝簇的距离相等，margin 那一项就是 0。
+    /// 必须推到**至少 5 格**：`margin` 取的是 48 个非中心样本的第 5 小（`margins[48/10]`），
+    /// 只推一两格动不了这个分位数。
+    func test_ambiguousCellsDropMarginBelowThreshold() throws {
+        let original = state(seed: 8)
+        var captures = SyntheticCapture.captures(of: original, rotations: [:], seed: 8)
+        let green = SyntheticCapture.referenceLab(.green)
+        let blue = SyntheticCapture.referenceLab(.blue)
+        let midway = LabColor(
+            l: (green.l + blue.l) / 2,
+            a: (green.a + blue.a) / 2,
+            b: (green.b + blue.b) / 2
+        )
+
+        var patched = 0
+        for index in captures.indices {
+            var samples = captures[index].samples
+            for position in 0..<9 where position != 4 && samples[position].distance(to: green) < 0.01 {
+                samples[position] = midway
+                patched += 1
+            }
+            captures[index] = FaceCapture(samples: samples)
+        }
+        XCTAssertGreaterThanOrEqual(patched, 5, "造不出这个用例：绿贴纸不够 5 格")
+
+        let result = try StickerClassifier.classify(captures)
+        XCTAssertLessThan(
+            result.margin, ClassifiedFaces.lowConfidenceThreshold,
+            "有 \(patched) 格骑在绿蓝之间，margin 却没掉下来：\(result.margin)"
+        )
+    }
 }

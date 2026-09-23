@@ -10,11 +10,17 @@ import CubeSolve
 struct FaceEntryView: View {
     let model: RestoreModel
     let onScan: () -> Void
+    /// 拍照识别回来时把握度不够的提醒；nil 表示够有把握（或还没拍过）
+    ///
+    /// 必须排在 `onSolved` **前面**：`onSolved` 是尾随闭包，得是成员逐一构造器的
+    /// 最后一个参数，否则调用处 `FaceEntryView(...) { state, solution in }` 绑不上。
+    @Binding var scanHint: String?
     let onSolved: (CubeState, CubeSolution) -> Void
 
     var body: some View {
         VStack(spacing: 14) {
             scanEntry
+            scanWarning
             hint
             Spacer(minLength: 0)
             editor
@@ -60,6 +66,43 @@ struct FaceEntryView: View {
         }
         .disabled(model.isSolving)
         .padding(.top, 4)
+    }
+
+    // MARK: - 识别把握度提醒
+
+    /// 拍照识别回来、但把握度不够时的提醒。
+    ///
+    /// 刻意**不拦**：把握度低只说明有格子骑在两个颜色中间，结果仍可能是对的，而回录入
+    /// 手改一格的成本远低于重拍六个面。所以给一句提醒加一个关掉，判断权交给人。
+    @ViewBuilder
+    private var scanWarning: some View {
+        if let scanHint {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.footnote)
+                Text(scanHint)
+                    .font(.footnote)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Button {
+                    self.scanHint = nil
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.caption2.weight(.semibold))
+                        .padding(4)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("关掉这条提醒")
+            }
+            .foregroundStyle(.yellow)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .background(Color.yellow.opacity(0.14), in: RoundedRectangle(cornerRadius: 10))
+            .overlay {
+                RoundedRectangle(cornerRadius: 10)
+                    .strokeBorder(Color.yellow.opacity(0.35), lineWidth: 1)
+            }
+        }
     }
 
     // MARK: - 说明

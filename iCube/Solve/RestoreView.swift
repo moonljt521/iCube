@@ -14,10 +14,12 @@ struct RestoreView: View {
     @State private var model = RestoreModel()
     @State private var path: [SolutionPayload] = []
     @State private var isScanning = false
+    /// 拍照识别回来时带的把握度提醒。只提醒不拦截——回录入手改一格比重拍六个面便宜。
+    @State private var scanHint: String?
 
     var body: some View {
         NavigationStack(path: $path) {
-            FaceEntryView(model: model, onScan: { isScanning = true }) { state, solution in
+            FaceEntryView(model: model, onScan: { isScanning = true }, scanHint: $scanHint) { state, solution in
                 path.append(SolutionPayload(state: state, solution: solution))
             }
             .navigationTitle("还原")
@@ -33,8 +35,9 @@ struct RestoreView: View {
         }
         .tint(.orange)
         .fullScreenCover(isPresented: $isScanning) {
-            ScanView { state in
+            ScanView { state, hint in
                 model.load(state: state)
+                scanHint = hint
             }
         }
     }

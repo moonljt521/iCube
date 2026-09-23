@@ -14,8 +14,9 @@ struct ScanView: View {
 
     @State private var model = ScanModel()
 
-    /// 识别成功：把拼好的状态交出去
-    let onFinished: (CubeState) -> Void
+    /// 识别成功：把拼好的状态交出去。
+    /// 第二个参数是**把握度不够时的提醒**，够有把握时为 nil——见 `ScanModel.onFinished`。
+    let onFinished: (CubeState, String?) -> Void
 
     var body: some View {
         ZStack {
@@ -25,8 +26,8 @@ struct ScanView: View {
         .toolbar(.hidden, for: .navigationBar)
         .overlay(alignment: .top) { topBar }
         .task {
-            model.onFinished = { state in
-                onFinished(state)
+            model.onFinished = { state, hint in
+                onFinished(state, hint)
                 dismiss()
             }
             model.start()

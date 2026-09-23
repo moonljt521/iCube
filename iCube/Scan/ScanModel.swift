@@ -89,8 +89,12 @@ final class ScanModel {
     /// 界面回填的视图尺寸
     private(set) var viewSize: CGSize = .zero
 
-    /// 识别成功后的回调：拿到拼好的状态，交给录入页复核
-    @ObservationIgnored var onFinished: ((CubeState) -> Void)?
+    /// 识别成功后的回调：拿到拼好的状态，交给录入页复核。
+    ///
+    /// 第二个参数是**把握度不够时的提醒**，够有把握时为 nil。刻意只提醒不拦截：
+    /// 把握度低只说明有格子骑在两个颜色中间，结果仍可能是对的，而回录入手改一格的
+    /// 成本远低于重拍六个面——判断权交给人。
+    @ObservationIgnored var onFinished: ((CubeState, String?) -> Void)?
 
     private let camera = CameraSession()
     private let sampling = SamplingState()
@@ -278,7 +282,7 @@ final class ScanModel {
                     guard let state = FaceletAssembler.assemble(classified.colors) else {
                         return .failed("这六个面拼不出一个真实的魔方。多半是有一格认错了颜色，或者拍到了同一个面——请重拍。")
                     }
-                    return .assembled(state)
+                    return .assembled(state, margin: classified.margin)
                 } catch let error as ScanError {
                     return .failed(error.userMessage)
                 } catch {
@@ -288,19 +292,30 @@ final class ScanModel {
 
             guard let self else { return }
             switch outcome {
-            case .assembled(let state):
-                self.onFinished?(state)
+            case .assembled(let state, let margin):
+                self.onFinished?(state, Self.confidenceHint(margin: margin))
             case .failed(let message):
                 self.phase = .failed(message)
             }
         }
+    }
+
+    /// 把握度不够时给一句提醒；够有把握返回 nil。
+    ///
+    /// 文案要说清"哪里可能不对、该怎么办"——只说"把握不大"用户不知道下一步做什么。
+    /// 非 private 是为了让测试能直接钉住阈值边界。
+    static func confidenceHint(margin: Double) -> String? {
+        guard margin < ClassifiedFaces.lowConfidenceThreshold else { return nil }
+        return "识别把握不大（把握度 \(String(format: "%.1f", margin))）。"
+            + "反光或光线不均时容易有格子认错，建议对照展开图核一遍，不对就改一格或重拍。"
     }
 }
 
 /// 识别的两种出口。用专门的枚举而不是 `Result<CubeState, String>`——
 /// `Result` 的 Failure 必须实现 `Error`，而这里的失败只需要一句给用户看的话。
 private enum ScanOutcome {
-    case assembled(CubeState)
+    /// 成功。带上 `ClassifiedFaces.margin`——应用层靠它决定要不要提醒用户复核。
+    case assembled(CubeState, margin: Double)
     case failed(String)
 }
 

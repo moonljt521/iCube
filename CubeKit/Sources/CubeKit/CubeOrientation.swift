@@ -1,5 +1,79 @@
 import Foundation
 
+/// 整体旋转的全部 24 种组合（x/y/z 各 0~3 个 90° 的笛卡尔积里 64 条，含重复）。
+/// 重复不要紧——调用方都是"存在性判断"或"取极值"，重复不影响结果。
+enum WholeCubeRotations {
+    static let all: [Algorithm] = {
+        var result: [Algorithm] = []
+        for x in 0..<4 {
+            for y in 0..<4 {
+                for z in 0..<4 {
+                    var moves: [Move] = []
+                    for _ in 0..<x { moves.append(Move(.rotation(.x), .cw)) }
+                    for _ in 0..<y { moves.append(Move(.rotation(.y), .cw)) }
+                    for _ in 0..<z { moves.append(Move(.rotation(.z), .cw)) }
+                    result.append(Algorithm(moves))
+                }
+            }
+        }
+        return result
+    }()
+}
+
+public extension CubeState {
+
+    /// 落在自己归属位置上的贴纸数（还原态 = 6N²）
+    var homeStickerCount: Int {
+        let solved = CubeState.solvedColors(size: size)
+        var count = 0
+        for (index, color) in stickers.enumerated() where color == solved[index] { count += 1 }
+        return count
+    }
+
+    /// 与 `other` 是否只差一个整体旋转
+    func isRotationEquivalent(to other: CubeState) -> Bool {
+        guard size == other.size else { return false }
+        return WholeCubeRotations.all.contains { applying($0) == other }
+    }
+
+    /// 在"只差一个整体旋转"的一族写法里挑一个确定的代表。
+    ///
+    /// ## 为什么需要
+    ///
+    /// 奇数阶有中心块锚定（`legality` 要求中心各就各位），同一颗魔方只有一种写法；
+    /// 偶数阶没有固定中心块，**24 种整体旋转全都是合法状态**。拍照识别只能给出
+    /// "其中一个"，不规范化的话同一颗魔方每次识别出来的朝向都会乱跳，
+    /// 录入页也就没法跟手上的魔方对照。
+    ///
+    /// ## 挑法
+    ///
+    /// 取**贴纸落在自己归属位置最多的那个**——也就是"最像还原态"的那个写法，
+    /// 与用户把魔方白顶绿前拿在手里的习惯最接近；同分时取贴纸序列字典序最小的，
+    /// 保证确定性。三阶原样返回，不做多余的事。
+    var rotationallyCanonical: CubeState {
+        guard size != 3 else { return self }
+        var best = self
+        var bestScore = homeStickerCount
+        for rotation in WholeCubeRotations.all {
+            let candidate = applying(rotation)
+            let score = candidate.homeStickerCount
+            if score > bestScore || (score == bestScore && candidate.isLexicographicallyPreceding(best)) {
+                best = candidate
+                bestScore = score
+            }
+        }
+        return best
+    }
+
+    /// 贴纸序列的字典序比较，仅用于打破并列
+    func isLexicographicallyPreceding(_ other: CubeState) -> Bool {
+        for (lhs, rhs) in zip(stickers, other.stickers) where lhs != rhs {
+            return lhs.rawValue < rhs.rawValue
+        }
+        return false
+    }
+}
+
 /// 魔方整体在空间中的朝向：记录"当前指向视图右/上/前三个方向的本体方向"。
 /// 用户拖背景旋转视角只改这个值，不改 `CubeState`；把视图记法（教程/打乱里的 U、R）
 /// 翻译成本体记法靠它。

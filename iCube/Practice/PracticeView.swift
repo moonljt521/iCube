@@ -31,7 +31,14 @@ struct PracticeView: View {
         .onChange(of: skinID) { _, newValue in
             model.scene.applySkin(MaterialCache.skin(id: newValue))
         }
-        .fullScreenCover(isPresented: $showingRestore) { RestoreView() }
+        // `.id(model.cubeSize)` 不是装饰：`RestoreView` 把 `RestoreModel` 放在 `@State` 里，
+        // 而 SwiftUI **只在视图身份第一次建立时**采用 `State(initialValue:)`。cover 的内容视图
+        // 身份是稳定的，少了这个 id，阶数会被冻结在第一次打开还原页时的值——切到 2 阶再进来
+        // 仍然是九宫格。棋盘那边（`CubeBoardView`）用的是同一招。
+        .fullScreenCover(isPresented: $showingRestore) {
+            RestoreView(size: model.cubeSize)
+                .id(model.cubeSize)
+        }
     }
 
     @ToolbarContentBuilder

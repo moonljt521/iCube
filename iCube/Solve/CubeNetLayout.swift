@@ -26,20 +26,21 @@ struct CubeNetLayout {
 
     static let faceColumns = 4
     static let faceRows = 3
-    /// 每面 3×3
-    static let faceSize = 3
 
+    /// 每面 N×N 格（随阶数变化）
+    let faceSize: Int
     let cellSize: CGFloat
     /// 整张展开图在容器坐标系里的左上角（容器大于展开图时居中）
     let origin: CGPoint
     let netSize: CGSize
 
-    init(in size: CGSize) {
-        let cell = max(0, min(size.width / CGFloat(Self.faceColumns * Self.faceSize),
-                              size.height / CGFloat(Self.faceRows * Self.faceSize)))
+    init(in size: CGSize, faceSize: Int = 3) {
+        self.faceSize = faceSize
+        let cell = max(0, min(size.width / CGFloat(Self.faceColumns * faceSize),
+                              size.height / CGFloat(Self.faceRows * faceSize)))
         cellSize = cell
-        netSize = CGSize(width: cell * CGFloat(Self.faceColumns * Self.faceSize),
-                         height: cell * CGFloat(Self.faceRows * Self.faceSize))
+        netSize = CGSize(width: cell * CGFloat(Self.faceColumns * faceSize),
+                         height: cell * CGFloat(Self.faceRows * faceSize))
         origin = CGPoint(x: (size.width - netSize.width) / 2,
                          y: (size.height - netSize.height) / 2)
     }
@@ -55,13 +56,13 @@ struct CubeNetLayout {
     /// 某面左上角在容器坐标系里的位置
     func faceOrigin(_ face: Face) -> CGPoint {
         let slot = Self.slot(of: face)
-        return CGPoint(x: origin.x + CGFloat(slot.col * Self.faceSize) * cellSize,
-                       y: origin.y + CGFloat(slot.row * Self.faceSize) * cellSize)
+        return CGPoint(x: origin.x + CGFloat(slot.col * faceSize) * cellSize,
+                       y: origin.y + CGFloat(slot.row * faceSize) * cellSize)
     }
 
     /// 某面整体在容器坐标系里的矩形
     func faceRect(_ face: Face) -> CGRect {
-        let side = cellSize * CGFloat(Self.faceSize)
+        let side = cellSize * CGFloat(faceSize)
         return CGRect(origin: faceOrigin(face), size: CGSize(width: side, height: side))
     }
 
@@ -73,9 +74,9 @@ struct CubeNetLayout {
         guard x >= 0, y >= 0 else { return nil }
         let cellCol = Int(x / cellSize)
         let cellRow = Int(y / cellSize)
-        guard cellCol < Self.faceColumns * Self.faceSize,
-              cellRow < Self.faceRows * Self.faceSize else { return nil }
-        guard let face = Self.slots[cellRow / Self.faceSize][cellCol / Self.faceSize] else { return nil }
-        return (face, cellRow % Self.faceSize, cellCol % Self.faceSize)
+        guard cellCol < Self.faceColumns * faceSize,
+              cellRow < Self.faceRows * faceSize else { return nil }
+        guard let face = Self.slots[cellRow / faceSize][cellCol / faceSize] else { return nil }
+        return (face, cellRow % faceSize, cellCol % faceSize)
     }
 }

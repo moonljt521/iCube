@@ -1,10 +1,13 @@
 import CubeKit
 import Foundation
 
-/// 一次拍摄的 9 个采样色，按"正视该面时的 row-major"排。下标 4 是中心块。
+/// 一次拍摄的 N² 个采样色，按"正视该面时的 row-major"排。
 ///
-/// 这里**不记录这是哪个面**——面的身份由中心块的颜色决定，而中心块的颜色要等
-/// 六个面凑齐、一起做完聚类才知道。用户按什么顺序、什么角度拍都不影响结果。
+/// 这里**不记录这是哪个面**——奇数阶的面身份由中心块的颜色决定，而中心块的颜色
+/// 要等六个面凑齐、一起做完聚类才知道。用户按什么顺序、什么角度拍都不影响结果。
+///
+/// 偶数阶连中心块都没有，面身份更是无从判断，只能先按拍摄次序占位，
+/// 真正的"哪张照片对应哪个面"交给 `FaceletAssembler` 枚举。
 public struct FaceCapture: Hashable, Sendable {
     public let samples: [LabColor]
 
@@ -12,16 +15,28 @@ public struct FaceCapture: Hashable, Sendable {
         self.samples = samples
     }
 
-    /// 中心块采样
+    /// 阶数：由采样格数 N² 反推（和 `CubeState.size` 同一套"不落盘"的做法）
+    public var size: Int {
+        let value = Int(Double(samples.count).squareRoot().rounded())
+        precondition(value * value == samples.count, "采样格数 \(samples.count) 不是平方数")
+        return value
+    }
+
+    /// 中心块采样。**偶数阶没有中心块**，返回 nil
     public var center: LabColor? {
-        samples.count == 9 ? samples[4] : nil
+        let n = size
+        guard n % 2 == 1 else { return nil }
+        return samples[(n * n - 1) / 2]
     }
 }
 
 /// 一次识别的结果
 public struct ClassifiedFaces: Hashable, Sendable {
-    /// 每个面的 9 格颜色，次序是**拍摄时的读入次序**，可能相对该面的标准朝向转了 90°/180°/270°。
+    /// 每个面的 N² 格颜色，次序是**拍摄时的读入次序**，可能相对该面的标准朝向转了 90°/180°/270°。
     /// 摆正由 `FaceletAssembler` 负责。
+    ///
+    /// 键的含义随阶数不同：**奇数阶是真正的面**（由中心块颜色定出）；
+    /// **偶数阶只是"第几张照片"的占位**（按 `Face.allCases` 的次序）。
     public let colors: [Face: [CubeColor]]
 
     /// 把握程度：所有样本"到本簇距离"与"到次近簇距离"之差的最小十分位（Lab 单位）。
@@ -39,7 +54,7 @@ public struct ClassifiedFaces: Hashable, Sendable {
 public enum ScanError: Error, Equatable, Sendable {
     case wrongFaceCount(Int)
     case wrongSampleCount(face: Int, count: Int)
-    /// 两个面的中心块颜色太接近——多半是同一面拍了两次
+    /// 两个面的中心块颜色太接近——多半是同一面拍了两次（奇数阶）
     case duplicateCenter(first: Int, second: Int, distance: Double)
     /// 两个面被判成了同一种颜色。理论上命名是双射，走到这里说明聚类退化了
     case duplicateFace(Face)
@@ -47,24 +62,42 @@ public enum ScanError: Error, Equatable, Sendable {
     case ambiguousColors
 }
 
-/// 把 54 个采样色归成 6 种颜色。
+/// 把 6N² 个采样色归成 6 种颜色。
 ///
 /// ## 为什么不能直接拿固定参考色做最近邻
 ///
 /// 现场光照、白平衡、贴纸材质都会让同一种颜色拍出不同的 Lab，偏差常常比
-/// 红与橙之间的差距还大。所以这里**自带标定**：六个中心块在物理上必然互异，
-/// 是六种颜色的天然锚点，直接拿它们当聚类种子，颜色空间就跟着这次拍摄走。
+/// 红与橙之间的差距还大。所以这里**自带标定**，直接拿现场样本当聚类种子，
+/// 颜色空间就跟着这次拍摄走。
 ///
-/// ## 流程
+/// ## 种子从哪来（奇数阶与偶数阶的分岔）
 ///
-/// 1. 六个中心块采样作种子，把其余 48 个样本迭代分配到最近的簇
-/// 2. 用"每色恰好 9 个"这条硬约束修掉边界误判——簇大小不对就搬最骑墙的那个样本
-/// 3. 认出哪一簇是白（彩度最低的那个），用它做白点校正
-/// 4. 剩下五簇按校正后的 Lab 距离对到黄/绿/蓝/红/橙
+/// **奇数阶**：六个中心块在物理上必然互异，是六种颜色的天然锚点，直接当种子。
+/// 而且中心块永不换面，聚类过程中把它们钉死在自己那一簇，结果更稳。
+///
+/// **偶数阶**：没有中心块。改用**最远点采样**——先取彩度最低的样本当白
+/// （白色是唯一接近无彩的，这比"最亮的那个"稳），再反复取"离已选种子最远"的
+/// 样本补足六个。与 k-means++ 的初始化同一路子，无随机数、确定性强。
+///
+/// ## 硬约束
+///
+/// 无论哪种阶数，每种颜色恰好 N² 个（物理事实）。簇大小不对就搬最骑墙的样本，
+/// 能把边界上偶尔判错的一两个样本拉回来。
 public enum StickerClassifier {
 
-    /// 两个中心块采样近到这个程度，就认为用户把同一面拍了两遍
+    /// 两个中心块采样近到这个程度，就认为用户把同一面拍了两遍（奇数阶）
     public static let duplicateCenterDistance = 10.0
+
+    /// 两张照片整面平均色差小于这个程度，就认为"很像"。**只用来提醒，不用来拒绝**。
+    ///
+    /// 为什么不能拿它拦：偶数阶没有中心块，只能整面比，而"两个**不同的**面互为 90° 旋转"
+    /// 是家常便饭——二阶一面只有 4 格，实测测试素材页里第 3 面（`BRUF`）与第 6 面（`UBFR`）
+    /// 就完全互为旋转，色差 5.2。真机上照这个拦，用户会卡在"第 6 面怎么都拍不进去"。
+    ///
+    /// 而且这道判据**原理上就分不开**：两张照片的差别只来自光照与磨损，跟"是不是同一个面"
+    /// 没有必然关系（合成数据里两个互为旋转的不同面，色差是 0）。所以偶数阶只在拍摄当场
+    /// 提一句"很像"，收不收由用户决定；真的拍重了，最后拼装会失败并提示。
+    public static let duplicateCaptureDistance = 3.0
 
     /// 聚类迭代上限。实测两三次就收敛，留余量
     public static let maxIterations = 12
@@ -80,72 +113,159 @@ public enum StickerClassifier {
         .orange: LabColor(srgbRed: 0.98, green: 0.45, blue: 0.05),
     ]
 
-    public static func classify(_ captures: [FaceCapture]) throws -> ClassifiedFaces {
-        guard captures.count == 6 else { throw ScanError.wrongFaceCount(captures.count) }
-        for (index, capture) in captures.enumerated() where capture.samples.count != 9 {
+    /// - Parameter size: 阶数。缺省 3，保持旧调用不变。
+    public static func classify(_ captures: [FaceCapture], size: Int = 3) throws -> ClassifiedFaces {
+        guard captures.count == Face.count else { throw ScanError.wrongFaceCount(captures.count) }
+        let per = size * size
+        for (index, capture) in captures.enumerated() where capture.samples.count != per {
             throw ScanError.wrongSampleCount(face: index, count: capture.samples.count)
         }
-        let centers = captures.map { $0.samples[4] }
 
-        // 中心块两两拉开距离：太近说明同一面拍了两次，或者有面没拍到
-        for first in 0..<6 {
-            for second in (first + 1)..<6 {
+        let centerIndex = size % 2 == 1 ? (per - 1) / 2 : nil
+
+        // 判重面只在奇数阶做：中心块两两互异是硬事实，比中心色判得准。
+        // 偶数阶没有中心块，整面比**原理上分不开**"同一个面"与"两个互为旋转的不同面"
+        // （见 `duplicateCaptureDistance`），判错了会把一次正常扫描直接毙掉，
+        // 所以干脆不判——真拍重了，拼装那一步自然会失败。
+        if let centerIndex {
+            try rejectDuplicateCenters(captures, centerIndex: centerIndex)
+        }
+
+        // 自由样本：capture * per + offset，奇数阶跳过被钉死的中心块
+        var samples: [LabColor] = []
+        samples.reserveCapacity(captures.count * per)
+        for capture in captures {
+            for offset in 0..<per where offset != centerIndex {
+                samples.append(capture.samples[offset])
+            }
+        }
+
+        let pinned: [LabColor?]
+        let seeds: [LabColor]
+        if let centerIndex {
+            let centers = captures.map { $0.samples[centerIndex] }
+            seeds = centers
+            pinned = centers.map { Optional($0) }
+        } else {
+            let picked = farthestPointSeeds(samples)
+            guard picked.count == Face.count else { throw ScanError.ambiguousColors }
+            seeds = picked
+            pinned = Array(repeating: nil, count: Face.count)
+        }
+
+        var assignment = assign(samples, seeds: seeds)
+        var clusterCenters = centroids(samples: samples, seeds: seeds, pinned: pinned, assignment: assignment)
+        for _ in 0..<maxIterations {
+            let next = assign(samples, seeds: clusterCenters)
+            let nextCenters = centroids(samples: samples, seeds: seeds, pinned: pinned, assignment: next)
+            if next == assignment, nextCenters == clusterCenters { break }
+            assignment = next
+            clusterCenters = nextCenters
+        }
+
+        // 硬约束：每簇恰好 N² 个（奇数阶的中心块已经钉死在簇里，从自由样本里少算一个）
+        let target = per - (centerIndex == nil ? 0 : 1)
+        repair(&assignment, samples: samples, centroids: clusterCenters, target: target)
+
+        let names = name(centroids: clusterCenters)
+        let confidence = margin(samples: samples, centroids: clusterCenters, assignment: assignment)
+
+        var colors: [Face: [CubeColor]] = [:]
+        if let centerIndex {
+            // 奇数阶：每个中心块落在哪一簇，那一簇就代表这个面的颜色
+            for index in captures.indices {
+                guard let color = names[index] else { throw ScanError.ambiguousColors }
+                let face = Face.allCases.first { $0.defaultColor == color }!
+                guard colors[face] == nil else { throw ScanError.duplicateFace(face) }
+                var grid = [CubeColor]()
+                grid.reserveCapacity(per)
+                // `samples` 按 capture 顺序铺开，每个 capture 占 per−1 格（跳过中心）
+                var cursor = index * (per - 1)
+                for position in 0..<per {
+                    if position == centerIndex {
+                        grid.append(color)
+                    } else {
+                        guard let name = names[assignment[cursor]] else { throw ScanError.ambiguousColors }
+                        grid.append(name)
+                        cursor += 1
+                    }
+                }
+                colors[face] = grid
+            }
+        } else {
+            // 偶数阶：面身份无从判断，先按拍摄次序占位
+            for index in captures.indices {
+                var grid = [CubeColor]()
+                grid.reserveCapacity(per)
+                var cursor = index * per
+                for _ in 0..<per {
+                    guard let name = names[assignment[cursor]] else { throw ScanError.ambiguousColors }
+                    grid.append(name)
+                    cursor += 1
+                }
+                colors[Face.allCases[index]] = grid
+            }
+        }
+
+        return ClassifiedFaces(colors: colors, margin: confidence)
+    }
+
+    // MARK: - 判重面
+
+    /// 奇数阶：中心块两两拉开距离。太近说明同一面拍了两次，或者有面没拍到
+    private static func rejectDuplicateCenters(_ captures: [FaceCapture], centerIndex: Int) throws {
+        let centers = captures.map { $0.samples[centerIndex] }
+        for first in 0..<centers.count {
+            for second in (first + 1)..<centers.count {
                 let distance = centers[first].distance(to: centers[second])
                 if distance < duplicateCenterDistance {
                     throw ScanError.duplicateCenter(first: first, second: second, distance: distance)
                 }
             }
         }
+    }
 
-        // 非中心样本：capture * 8 + offset，offset 跳过下标 4
-        var samples: [LabColor] = []
-        samples.reserveCapacity(48)
-        for capture in captures {
-            for index in 0..<9 where index != 4 { samples.append(capture.samples[index]) }
+    /// 两个面网格在"各自转过 90° 的整数倍"下最接近时的逐格平均色差。
+    ///
+    /// 偶数阶的判重面用不上它（见 `duplicateCaptureDistance` 里为什么分不开），
+    /// 只给应用层在拍摄当场提一句"很像"用。
+    public static func closestRotationDistance(_ lhs: [LabColor], _ rhs: [LabColor]) -> Double {
+        guard lhs.count == rhs.count, !lhs.isEmpty else { return .infinity }
+        let size = Int(Double(lhs.count).squareRoot().rounded())
+        guard size * size == lhs.count else { return .infinity }
+        var best = Double.infinity
+        for turns in 0..<FaceletAssembler.rotationsPerFace {
+            let rotated = FaceletAssembler.rotated(lhs, quarterTurns: turns, size: size)
+            var total = 0.0
+            for (a, b) in zip(rotated, rhs) { total += a.distance(to: b) }
+            best = min(best, total / Double(lhs.count))
         }
-
-        var assignment = assign(samples, seeds: centers)
-        var clusterCenters = centroids(samples: samples, centers: centers, assignment: assignment)
-        for _ in 0..<maxIterations {
-            let next = assign(samples, seeds: clusterCenters)
-            let nextCenters = centroids(samples: samples, centers: centers, assignment: next)
-            if next == assignment, nextCenters == clusterCenters { break }
-            assignment = next
-            clusterCenters = nextCenters
-        }
-
-        // 硬约束：每簇除中心块外恰好 8 个
-        repair(&assignment, samples: samples, centroids: clusterCenters)
-
-        let names = name(centroids: clusterCenters)
-        let confidence = margin(samples: samples, centroids: clusterCenters, assignment: assignment)
-
-        // 每个中心块落在哪一簇，那一簇就代表这个面的颜色
-        var colors: [Face: [CubeColor]] = [:]
-        for index in captures.indices {
-            guard let color = names[index] else { throw ScanError.ambiguousColors }
-            let face = Face.allCases.first { $0.defaultColor == color }!
-            guard colors[face] == nil else { throw ScanError.duplicateFace(face) }
-            var grid = [CubeColor]()
-            grid.reserveCapacity(9)
-            // `samples` 按 capture 顺序铺开，每个 capture 占 8 格（跳过中心）
-            var cursor = index * 8
-            for position in 0..<9 {
-                if position == 4 {
-                    grid.append(color)
-                } else {
-                    guard let name = names[assignment[cursor]] else { throw ScanError.ambiguousColors }
-                    grid.append(name)
-                    cursor += 1
-                }
-            }
-            colors[face] = grid
-        }
-
-        return ClassifiedFaces(colors: colors, margin: confidence)
+        return best
     }
 
     // MARK: - 聚类
+
+    /// 偶数阶的种子：最远点采样（k-means++ 那一路子，但确定性的）
+    private static func farthestPointSeeds(_ samples: [LabColor]) -> [LabColor] {
+        guard samples.count >= Face.count else { return [] }
+        var seeds: [LabColor] = []
+        // 白是唯一彩度接近 0 的，先把它挑出来当第一个种子
+        if let whitest = samples.min(by: { $0.chroma < $1.chroma }) { seeds.append(whitest) }
+        while seeds.count < Face.count {
+            var best: LabColor?
+            var bestDistance = -1.0
+            for sample in samples {
+                let nearest = seeds.map { sample.distance(to: $0) }.min() ?? .infinity
+                if nearest > bestDistance {
+                    bestDistance = nearest
+                    best = sample
+                }
+            }
+            guard let best, bestDistance > 0 else { return [] }
+            seeds.append(best)
+        }
+        return seeds
+    }
 
     /// 每个样本归到最近的种子
     private static func assign(_ samples: [LabColor], seeds: [LabColor]) -> [Int] {
@@ -163,14 +283,16 @@ public enum StickerClassifier {
         }
     }
 
-    /// 重算各簇中心：中心块采样是固定的，永远属于自己那一簇
+    /// 重算各簇中心：`pinned` 里给了固定成员的簇（奇数阶的中心块），那份采样永远属于自己那一簇
     private static func centroids(
         samples: [LabColor],
-        centers: [LabColor],
+        seeds: [LabColor],
+        pinned: [LabColor?],
         assignment: [Int]
     ) -> [LabColor] {
-        var sums = Array(repeating: (l: 0.0, a: 0.0, b: 0.0), count: 6)
-        var counts = Array(repeating: 0, count: 6)
+        let count = seeds.count
+        var sums = Array(repeating: (l: 0.0, a: 0.0, b: 0.0), count: count)
+        var counts = Array(repeating: 0, count: count)
         for (index, sample) in samples.enumerated() {
             let cluster = assignment[index]
             sums[cluster].l += sample.l
@@ -178,24 +300,29 @@ public enum StickerClassifier {
             sums[cluster].b += sample.b
             counts[cluster] += 1
         }
-        return (0..<6).map { cluster in
-            let total = counts[cluster] + 1
-            return LabColor(
-                l: (sums[cluster].l + centers[cluster].l) / Double(total),
-                a: (sums[cluster].a + centers[cluster].a) / Double(total),
-                b: (sums[cluster].b + centers[cluster].b) / Double(total)
-            )
+        return (0..<count).map { cluster in
+            var l = sums[cluster].l
+            var a = sums[cluster].a
+            var b = sums[cluster].b
+            var total = counts[cluster]
+            if let fixed = pinned[cluster] {
+                l += fixed.l
+                a += fixed.a
+                b += fixed.b
+                total += 1
+            }
+            guard total > 0 else { return seeds[cluster] }
+            return LabColor(l: l / Double(total), a: a / Double(total), b: b / Double(total))
         }
     }
 
-    /// 把簇大小修到恰好 8：从超员的簇里挑"搬走代价最小"的样本，塞进缺员的簇。
+    /// 把簇大小修到恰好 `target`：从超员的簇里挑"搬走代价最小"的样本，塞进缺员的簇。
     ///
-    /// 这条约束不是启发式，是物理事实——三阶魔方每种颜色正好 9 个贴纸。
+    /// 这条约束不是启发式，是物理事实——每种颜色正好 N² 个贴纸。
     /// 它能把边界上偶尔判错的一两个样本拉回来。
-    private static func repair(_ assignment: inout [Int], samples: [LabColor], centroids: [LabColor]) {
-        let target = 8
+    private static func repair(_ assignment: inout [Int], samples: [LabColor], centroids: [LabColor], target: Int) {
         while true {
-            var counts = Array(repeating: 0, count: 6)
+            var counts = Array(repeating: 0, count: centroids.count)
             for cluster in assignment { counts[cluster] += 1 }
             guard let surplus = counts.indices.filter({ counts[$0] > target }).max(by: { counts[$0] < counts[$1] }),
                   let deficit = counts.indices.filter({ counts[$0] < target }).min(by: { counts[$0] < counts[$1] })
@@ -288,6 +415,7 @@ public enum StickerClassifier {
             }
             margins.append(other - own)
         }
+        guard !margins.isEmpty else { return 0 }
         margins.sort()
         return margins[margins.count / 10]
     }

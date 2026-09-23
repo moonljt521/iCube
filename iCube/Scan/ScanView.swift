@@ -6,17 +6,23 @@ import SwiftUI
 /// 拍照识别：六个面各拍一张，识别出当前状态。
 ///
 /// 拍照的次序和角度都随意——每个面拍进去时转了 90° 的几倍、先拍哪个面，
-/// 都不影响结果。面与面之间的对应关系由 `FaceletAssembler` 枚举 4⁶ 种朝向
-/// 筛出来，所以界面上只需要一条"已拍几个面"的进度，不需要告诉用户先拍哪面。
+/// 都不影响结果。面与面之间的对应关系由 `FaceletAssembler` 枚举筛出来，
+/// 所以界面上只需要一条"已拍几个面"的进度，不需要告诉用户先拍哪面。
+///
+/// 阶数由调用方按全局设置传进来（练习页的阶数开关），引导框与已拍缩略图都跟着变 N×N。
 struct ScanView: View {
 
     @Environment(\.dismiss) private var dismiss
 
-    @State private var model = ScanModel()
+    @State private var model: ScanModel
 
-    /// 识别成功：把拼好的状态交出去。
-    /// 第二个参数是**把握度不够时的提醒**，够有把握时为 nil——见 `ScanModel.onFinished`。
-    let onFinished: (CubeState, String?) -> Void
+    /// 识别成功：把结果交出去（状态 + 全部候选 + 提醒），见 `ScanModel.ScanResult`。
+    let onFinished: (ScanModel.ScanResult) -> Void
+
+    init(size: Int, onFinished: @escaping (ScanModel.ScanResult) -> Void) {
+        _model = State(initialValue: ScanModel(size: size))
+        self.onFinished = onFinished
+    }
 
     var body: some View {
         ZStack {
@@ -26,8 +32,8 @@ struct ScanView: View {
         .toolbar(.hidden, for: .navigationBar)
         .overlay(alignment: .top) { topBar }
         .task {
-            model.onFinished = { state, hint in
-                onFinished(state, hint)
+            model.onFinished = { result in
+                onFinished(result)
                 dismiss()
             }
             model.start()
@@ -99,7 +105,7 @@ struct ScanView: View {
 
     private var viewfinder: some View {
         GeometryReader { proxy in
-            let geometry = ScanGeometry(videoSize: model.videoSize, viewSize: proxy.size)
+            let geometry = ScanGeometry(videoSize: model.videoSize, viewSize: proxy.size, size: model.size)
             ZStack(alignment: .topLeading) {
                 CameraPreview(session: model.captureSession)
                 mask(geometry: geometry, size: proxy.size)
@@ -131,10 +137,12 @@ struct ScanView: View {
         .allowsHitTesting(false)
     }
 
-    /// 实时把"我现在读到的九个颜色"画出来，用户据此对齐
+    /// 实时把"我现在读到的 N² 个颜色"画出来，用户据此对齐。
+    ///
+    /// 用的是 `liveSamplesOnScreen`——模型已经把帧次序拧成屏幕次序了，这里别再自己索引。
     private func cells(geometry: ScanGeometry) -> some View {
-        let samples = model.liveSamples
-        return ForEach(0..<9, id: \.self) { index in
+        let samples = model.liveSamplesOnScreen
+        return ForEach(0..<model.cellCount, id: \.self) { index in
             let cell = geometry.cellRect(index, inset: 0.04)
             RoundedRectangle(cornerRadius: 5)
                 .fill(color(at: index, samples: samples))
@@ -193,12 +201,13 @@ struct ScanView: View {
     }
 
     private func slot(_ index: Int) -> some View {
-        let capture = index < model.captures.count ? model.captures[index] : nil
+        // 模型给的已经是屏幕次序，miniGrid 直接照画即可
+        let samples = model.captureSamplesOnScreen(at: index)
         return RoundedRectangle(cornerRadius: 6)
             .fill(Color.white.opacity(0.06))
             .overlay {
-                if let capture {
-                    miniGrid(capture.samples)
+                if let samples {
+                    miniGrid(samples)
                 } else {
                     Text("\(index + 1)")
                         .font(.caption2.monospacedDigit())
@@ -207,33 +216,36 @@ struct ScanView: View {
             }
             .overlay {
                 RoundedRectangle(cornerRadius: 6)
-                    .strokeBorder(capture == nil ? Color.white.opacity(0.18) : Color.orange,
-                                  lineWidth: capture == nil ? 1 : 2)
+                    .strokeBorder(samples == nil ? Color.white.opacity(0.18) : Color.orange,
+                                  lineWidth: samples == nil ? 1 : 2)
             }
             .aspectRatio(1, contentMode: .fit)
     }
 
+    /// 画一个面的 N² 格。**传进来的必须已经是屏幕次序**（见 `ScanModel.captureSamplesOnScreen`）——
+    /// 早先这里直接拿帧次序画，拍完的缩略图就跟刚看到的那一面差 90°。
     private func miniGrid(_ samples: [LabColor]) -> some View {
         GeometryReader { proxy in
-            let side = min(proxy.size.width, proxy.size.height) / 3
-            // 用 VStack/HStack 让网格**自身撑开**成 side*3 见方。
+            let size = model.size
+            let side = min(proxy.size.width, proxy.size.height) / CGFloat(size)
+            // 用 VStack/HStack 让网格**自身撑开**成 side*N 见方。
             //
             // 之前是 ZStack + 逐格 `.offset`，那是错的：`offset` 不参与布局，ZStack
             // 的布局尺寸只有 side*side，于是外层 `.frame(side*3, side*3)` 把这个小块
             // **居中**放进大框，左上角被推到 (side, side)——九格再从这里 offset 展开，
             // 右下角就冲出槽位了。
             VStack(spacing: 0) {
-                ForEach(0..<3, id: \.self) { row in
+                ForEach(0..<size, id: \.self) { row in
                     HStack(spacing: 0) {
-                        ForEach(0..<3, id: \.self) { column in
-                            let index = row * 3 + column
+                        ForEach(0..<size, id: \.self) { column in
+                            let index = row * size + column
                             Rectangle()
                                 .fill(index < samples.count ? samples[index].uiColor : Color.clear)
                         }
                     }
                 }
             }
-            .frame(width: side * 3, height: side * 3)
+            .frame(width: side * CGFloat(size), height: side * CGFloat(size))
             // 再撑满一层，把这块居中对齐到槽位里
             .frame(width: proxy.size.width, height: proxy.size.height)
         }
@@ -276,12 +288,12 @@ struct ScanView: View {
                     .strokeBorder(.white, lineWidth: 4)
                     .frame(width: 72, height: 72)
                 Circle()
-                    .fill(model.liveSamples == nil ? Color.white.opacity(0.35) : .white)
+                    .fill(model.hasLiveSamples ? .white : Color.white.opacity(0.35))
                     .frame(width: 58, height: 58)
             }
         }
         .buttonStyle(.plain)
-        .disabled(model.phase != .scanning || model.liveSamples == nil)
+        .disabled(model.phase != .scanning || !model.hasLiveSamples)
         .accessibilityLabel("拍下这一面")
     }
 

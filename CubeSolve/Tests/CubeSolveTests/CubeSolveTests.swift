@@ -156,11 +156,119 @@ final class CubeSolveTests: XCTestCase {
     // MARK: - 阶数
 
     func test_rejectsUnsupportedSize() {
-        for size in [2, 4] {
+        // 2 阶与 3 阶有求解器；4 阶要先做降阶（中心归位 + 翼棱配对），尚未实现
+        for size in [4, 5] {
             XCTAssertThrowsError(try CubeSolve.solve(.solved(size: size))) { error in
                 XCTAssertEqual(error as? CubeSolveError, .unsupportedSize(size))
             }
         }
+    }
+
+    // MARK: - 二阶（嵌入三阶）
+
+    func test_twoByTwoAlreadySolvedNeedsNoMoves() throws {
+        let solution = try CubeSolve.solve(.solved(size: 2))
+        XCTAssertTrue(solution.algorithm.isEmpty)
+    }
+
+    /// 二阶走的是"把角状态嵌进一个棱与中心都还原的三阶"的路子，
+    /// 解出来的外层转动序列必须真能把二阶还原。这条同时钉住了三件事：
+    /// 2 阶 ↔ 3 阶角块的槽位对应、外层转动在两种阶数上对角的动作一致、奇偶性补丁有效。
+    func test_twoByTwoRandomStatesAreSolved() throws {
+        for seed in 1...12 {
+            let scramble = Scramble.random(size: 2, length: 11, seed: UInt64(seed))
+            let state = scramble.initialState
+            XCTAssertFalse(state.isSolved, "seed \(seed) 的打乱不该是还原态")
+            let solution = try CubeSolve.solve(state)
+            XCTAssertEqual(state.applying(solution.algorithm), .solved(size: 2),
+                           "seed \(seed) 的二阶解不能还原：\(solution.notation)")
+            XCTAssertLessThanOrEqual(solution.count, 25, "seed \(seed) 解长超上限")
+        }
+    }
+
+    /// 角置换为奇的那一半状态，嵌入三阶时会与"棱置换为偶"冲突，
+    /// 必须靠对调 U 层两条棱凑合法。这里专门覆盖那半边。
+    func test_twoByTwoOddCornerPermutationIsSolvable() throws {
+        var covered = 0
+        for seed in 1...40 {
+            let state = Scramble.random(size: 2, length: 11, seed: UInt64(seed)).initialState
+            guard isOddCornerPermutation(state) else { continue }
+            covered += 1
+            let solution = try CubeSolve.solve(state)
+            XCTAssertEqual(state.applying(solution.algorithm), .solved(size: 2),
+                           "seed \(seed) 的奇角置换解不能还原")
+        }
+        XCTAssertGreaterThan(covered, 5, "样本里奇角置换太少，这条没测到东西")
+    }
+
+    /// 二阶整体旋转过的写法（同一颗魔方）也必须可解——识别出来的状态本来就是"某个整体旋转"
+    func test_twoByTwoRotatedRepresentationsAreSolvable() throws {
+        let state = Scramble.random(size: 2, length: 11, seed: 4).initialState
+        for move in [Move.x, Move.y, Move.z] {
+            let rotated = state.applying(move)
+            let solution = try CubeSolve.solve(rotated)
+            XCTAssertEqual(rotated.applying(solution.algorithm), .solved(size: 2),
+                           "整体旋转 \(move.notation) 后解不能还原")
+        }
+    }
+
+    /// 非法二阶（单角扭转）必须报 illegalState，而不是硬给一个解
+    func test_twoByTwoIllegalStateIsRejected() {
+        var stickers = CubeState.solved(size: 2).stickers
+        let x = V3(1, 0, 0), y = V3(0, 1, 0), z = V3(0, 0, 1)
+        let indices = [y, z, x].map { StickerGeometry.index(cubieCenter: V3(1, 1, 1), facing: $0, size: 2)! }
+        let colors = indices.map { stickers[$0] }
+        for (offset, index) in indices.enumerated() { stickers[index] = colors[(offset - 1 + 3) % 3] }
+        let twisted = CubeState(stickers: stickers)
+        XCTAssertThrowsError(try CubeSolve.solve(twisted)) { error in
+            guard case .illegalState = error as? CubeSolveError else {
+                return XCTFail("应报 illegalState，实际 \(error)")
+            }
+        }
+        _ = (x, z)
+    }
+
+    /// 角置换是不是奇的。二阶没有棱，奇偶是自由的——正好用来挑出需要补丁的那半边样本。
+    private func isOddCornerPermutation(_ state: CubeState) -> Bool {
+        var permutation = [Int](repeating: 0, count: 8)
+        var taken = [Bool](repeating: false, count: 8)
+        var signs: [(x: Int, y: Int, z: Int)] = []
+        for x in [1, -1] { for y in [1, -1] { for z in [1, -1] { signs.append((x, y, z)) } } }
+        let indexByCode = { (s: (x: Int, y: Int, z: Int)) in (s.x + 1) * 9 + (s.y + 1) * 3 + (s.z + 1) }
+        var table = [Int](repeating: -1, count: 27)
+        for (index, s) in signs.enumerated() { table[indexByCode(s)] = index }
+        let axisSign: [CubeColor: (Int, Int)] = [
+            .white: (1, 1), .yellow: (1, -1), .red: (0, 1),
+            .orange: (0, -1), .green: (2, 1), .blue: (2, -1),
+        ]
+        for (slot, s) in signs.enumerated() {
+            let center = V3(s.x, s.y, s.z)
+            let x = V3(s.x, 0, 0), y = V3(0, s.y, 0), z = V3(0, 0, s.z)
+            let normals = s.x * s.y * s.z > 0 ? [y, z, x] : [y, x, z]
+            let colors = normals.map { state.color(at: center, facing: $0)! }
+            var home = [0, 0, 0]
+            for color in colors {
+                let (axis, sign) = axisSign[color]!
+                home[axis] = sign
+            }
+            let index = table[(home[0] + 1) * 9 + (home[1] + 1) * 3 + (home[2] + 1)]
+            guard index >= 0, !taken[index] else { return false }
+            taken[index] = true
+            permutation[slot] = index
+        }
+        var visited = [Bool](repeating: false, count: 8)
+        var swaps = 0
+        for start in 0..<8 where !visited[start] {
+            var length = 0
+            var node = start
+            while !visited[node] {
+                visited[node] = true
+                node = permutation[node]
+                length += 1
+            }
+            swaps += length - 1
+        }
+        return swaps % 2 == 1
     }
 
     func test_rejectsMalformedFaceletString() {

@@ -21,9 +21,12 @@ public struct ScanGeometry: Hashable, Sendable {
     public let videoRect: CGRect
     /// 引导方框：视频矩形里居中的正方形
     public let guideRect: CGRect
+    /// 阶数：引导方框里切 N×N 格。2/3/4
+    public let size: Int
 
-    public init(videoSize: CGSize, viewSize: CGSize, guideRatio: Double = 0.82) {
+    public init(videoSize: CGSize, viewSize: CGSize, guideRatio: Double = 0.82, size: Int = 3) {
         self.viewSize = viewSize
+        self.size = size
         let video = Self.fit(videoSize: videoSize, into: viewSize)
         self.videoRect = video
         let side = min(video.width, video.height) * CGFloat(guideRatio)
@@ -57,10 +60,10 @@ public struct ScanGeometry: Hashable, Sendable {
     /// 本身是正方形，分开算与合并算结果相同；但合并算是个陷阱——换个非正方形的
     /// 引导框就会静默压扁，而这类"坐标算错一格"的 bug 在真机上极难发现。
     public func cellRect(_ index: Int, inset: Double = 0.18) -> CGRect {
-        let row = index / 3
-        let col = index % 3
-        let cellWidth = guideRect.width / 3
-        let cellHeight = guideRect.height / 3
+        let row = index / size
+        let col = index % size
+        let cellWidth = guideRect.width / CGFloat(size)
+        let cellHeight = guideRect.height / CGFloat(size)
         let cell = CGRect(
             x: guideRect.minX + CGFloat(col) * cellWidth,
             y: guideRect.minY + CGFloat(row) * cellHeight,
@@ -110,10 +113,11 @@ public struct ScanGeometry: Hashable, Sendable {
     /// 中心映到中心、把正方形映成同尺寸的正方形。所以引导框在帧里永远是居中的
     /// 正方形，只要把边长算对就行——转的是哪个方向，甚至转没转，都不影响它。
     ///
-    /// 受方向影响的只有 3×3 各格的**排列次序**：帧里的 row-major 次序可能是屏幕上
+    /// 受方向影响的只有 N×N 各格的**排列次序**：帧里的 row-major 次序可能是屏幕上
     /// 看到的那个网格整体转了 90°/180°。这也没关系——`FaceletAssembler` 本来就要
-    /// 枚举四种朝向，转过的格子它自己会摆正。**刻意不去追这个方向**，因为算错了
+    /// 枚举四种朝向，转过的格子它自己会摆正。**采样刻意不去追这个方向**，因为算错了
     /// 方向会得到一个镜像，而镜像不是旋转、拼不回去；干脆不追，就没有算错的机会。
+    /// 但**显示**要拧回来，见 `displayIndex(forFrameIndex:)`。
     ///
     /// 帧尺寸按"摆成竖的"来理解：应用锁竖屏，所以预览里显示出来的画面是竖的。
     public func guideRectInFrame(frameSize: CGSize) -> CGRect {
@@ -134,5 +138,49 @@ public struct ScanGeometry: Hashable, Sendable {
         let width = min(side / frameSize.width, 1)
         let height = min(side / frameSize.height, 1)
         return CGRect(x: (1 - width) / 2, y: (1 - height) / 2, width: width, height: height)
+    }
+
+    // MARK: - 帧次序 ↔ 屏幕次序
+
+    /// 相机帧里的第 `index` 格，画到**屏幕**上是第几格。
+    ///
+    /// ## 为什么需要拧
+    ///
+    /// 帧是横的、屏幕是竖的，预览层把画面**顺时针转了 90°**（`CameraPreview` 里设的
+    /// `videoRotationAngle = 90`）。采样按帧的 row-major 走，所以直接把 `samples[i]`
+    /// 画到屏幕上第 i 格，色块就会跟用户看到的贴纸差 90°——用户没法用它核对自己有没有
+    /// 把面填满方框。
+    ///
+    /// 顺时针转 90° 的映射：源 (row, col) 落到屏幕的 (row' = col, col' = N−1−row)。
+    ///
+    /// ## 只用于显示
+    ///
+    /// 喂给分类器的顺序**必须保持帧的次序**。这里改的只是"哪个采样色画在哪个格子里"，
+    /// 一旦顺手把采样顺序也改了，就会把"旋转"变成"转置"（镜像），而镜像不是旋转、
+    /// 下游 `FaceletAssembler` 补不回来。
+    public func displayIndex(forFrameIndex index: Int) -> Int {
+        Self.displayIndex(forFrameIndex: index, size: size)
+    }
+
+    /// `displayIndex(forFrameIndex:)` 的逆：屏幕上第 `index` 格该取帧里的哪一格
+    public func frameIndex(forDisplayIndex index: Int) -> Int {
+        Self.frameIndex(forDisplayIndex: index, size: size)
+    }
+
+    /// 同上，但不需要 geometry 实例——只跟阶数有关。
+    ///
+    /// 界面里凡是画采样色的地方都得过这一道：扫描页压在取景框上的实时色块、以及下面那排
+    /// 已拍缩略图。**漏了哪一处，哪一处就会跟用户看到的贴纸差 90°**（这次就是缩略图漏了）。
+    public static func displayIndex(forFrameIndex index: Int, size: Int) -> Int {
+        let row = index / size
+        let col = index % size
+        return col * size + (size - 1 - row)
+    }
+
+    /// 静态版的逆映射
+    public static func frameIndex(forDisplayIndex index: Int, size: Int) -> Int {
+        let row = index / size
+        let col = index % size
+        return (size - 1 - col) * size + row
     }
 }

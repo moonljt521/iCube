@@ -98,18 +98,19 @@ public enum StickerSampler {
         )
     }
 
-    /// 取 3×3 引导框里的 9 个代表色，按"正视该面时 row-major"排。
+    /// 取 N×N 引导框里的 N² 个代表色，按"正视该面时 row-major"排。
     /// `inset` 是每格向内收缩的比例——贴着格子边缘采会吃到塑料缝隙。
     public static func sampleGrid(
         _ buffer: PixelBufferView,
         normalizedGuide: CGRect,
+        size: Int = 3,
         inset: Double = 0.18,
         samplesPerAxis: Int = defaultSamplesPerAxis
     ) -> [LabColor]? {
         var result: [LabColor] = []
-        result.reserveCapacity(9)
-        for index in 0..<9 {
-            let rect = cellRect(in: normalizedGuide, index: index, inset: inset)
+        result.reserveCapacity(size * size)
+        for index in 0..<(size * size) {
+            let rect = cellRect(in: normalizedGuide, index: index, size: size, inset: inset)
             guard let color = sample(buffer, normalizedRect: rect, samplesPerAxis: samplesPerAxis) else {
                 return nil
             }
@@ -125,11 +126,11 @@ public enum StickerSampler {
     /// 长方形。这里要是拿 `guide.width` 去走 y 方向，网格会被纵向压扁：引导框越"高"
     /// （竖屏帧越明显），漏采越多——1280×720 的帧上九格只铺满引导框上方 56%，
     /// 最下面一行贴纸从来没被采到过，中间那行的采样还横跨两行贴纸。
-    public static func cellRect(in guide: CGRect, index: Int, inset: Double = 0.18) -> CGRect {
-        let row = index / 3
-        let col = index % 3
-        let cellWidth = guide.width / 3
-        let cellHeight = guide.height / 3
+    public static func cellRect(in guide: CGRect, index: Int, size: Int = 3, inset: Double = 0.18) -> CGRect {
+        let row = index / size
+        let col = index % size
+        let cellWidth = guide.width / CGFloat(size)
+        let cellHeight = guide.height / CGFloat(size)
         let cell = CGRect(
             x: guide.minX + CGFloat(col) * cellWidth,
             y: guide.minY + CGFloat(row) * cellHeight,

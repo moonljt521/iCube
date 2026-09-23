@@ -21,6 +21,7 @@ struct FaceEntryView: View {
         VStack(spacing: 14) {
             scanEntry
             scanWarning
+            candidateSwitcher
             hint
             Spacer(minLength: 0)
             editor
@@ -32,6 +33,38 @@ struct FaceEntryView: View {
         .padding(.horizontal, 16)
         .padding(.bottom, 12)
         .background(Color(white: 0.05).ignoresSafeArea())
+    }
+
+    // MARK: - 多种拼法
+
+    /// 识别出不止一种拼法时的切换入口。
+    ///
+    /// 只会在偶数阶出现：两个**不同的面**互为 90° 旋转时，照片分不出谁是谁
+    /// （实测二阶约一成状态如此，且用求解器验过每个候选都是真能拧出来的）。
+    /// 硬选一个是赌运气，所以把候选摆出来让用户对照魔方挑。
+    @ViewBuilder
+    private var candidateSwitcher: some View {
+        if model.hasCandidateChoices {
+            HStack(spacing: 10) {
+                Image(systemName: "arrow.triangle.2.circlepath")
+                    .font(.footnote)
+                Text("识别到 \(model.candidates.count) 种拼法，当前第 \(model.candidateIndex + 1) 种")
+                    .font(.footnote)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+                Button("换拼法") { model.cycleCandidate() }
+                    .font(.footnote.weight(.semibold))
+            }
+            .foregroundStyle(.orange)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .background(Color.orange.opacity(0.16), in: RoundedRectangle(cornerRadius: 10))
+            .overlay {
+                RoundedRectangle(cornerRadius: 10)
+                    .strokeBorder(Color.orange.opacity(0.4), lineWidth: 1)
+            }
+            .disabled(model.isSolving)
+        }
     }
 
     // MARK: - 拍照入口
@@ -108,7 +141,10 @@ struct FaceEntryView: View {
     // MARK: - 说明
 
     private var hint: some View {
-        Text("也可以照展开图逐格填色。魔方按 白顶 · 绿前 摆好，六个中心块已按标准配色填好。")
+        Text(model.hasFixedCenters
+             ? "也可以照展开图逐格填色。魔方按 白顶 · 绿前 摆好，六个中心块已按标准配色填好。"
+             : "也可以照展开图逐格填色。\(model.size) 阶没有固定中心块，识别结果的朝向是随手挑的一个"
+               + "（照片里不含“哪面朝上”）——配色对不上就按下面的「转 90°／翻 90°」拧到跟手上一致。")
             .font(.footnote)
             .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -118,7 +154,7 @@ struct FaceEntryView: View {
 
     private var editor: some View {
         GeometryReader { geometry in
-            let layout = CubeNetLayout(in: geometry.size)
+            let layout = CubeNetLayout(in: geometry.size, faceSize: model.size)
             ZStack(alignment: .topLeading) {
                 ForEach(Face.allCases, id: \.self) { face in
                     faceGrid(face, layout: layout)
@@ -136,15 +172,16 @@ struct FaceEntryView: View {
 
     private func faceGrid(_ face: Face, layout: CubeNetLayout) -> some View {
         let cell = layout.cellSize
+        let faceSize = model.size
         let origin = layout.faceOrigin(face)
         return ZStack(alignment: .topLeading) {
             RoundedRectangle(cornerRadius: 8)
                 .fill(Color.white.opacity(0.06))
-                .frame(width: cell * CGFloat(CubeNetLayout.faceSize),
-                       height: cell * CGFloat(CubeNetLayout.faceSize))
-            ForEach(0..<(CubeNetLayout.faceSize * CubeNetLayout.faceSize), id: \.self) { index in
-                let row = index / CubeNetLayout.faceSize
-                let col = index % CubeNetLayout.faceSize
+                .frame(width: cell * CGFloat(faceSize),
+                       height: cell * CGFloat(faceSize))
+            ForEach(0..<(faceSize * faceSize), id: \.self) { index in
+                let row = index / faceSize
+                let col = index % faceSize
                 stickerCell(face: face, row: row, col: col)
                     .frame(width: cell, height: cell)
                     .offset(x: CGFloat(col) * cell, y: CGFloat(row) * cell)
@@ -222,6 +259,11 @@ struct FaceEntryView: View {
                     .font(.footnote.weight(.medium))
                     .foregroundStyle(model.canSolve ? .green : .secondary)
                 Spacer(minLength: 0)
+                // 偶数阶才给：没有中心块锚定，识别结果的朝向得让用户自己拧
+                if model.canRotate {
+                    Button("转 90°") { model.rotate(by: .y) }
+                    Button("翻 90°") { model.rotate(by: .x) }
+                }
                 Button("清空") { model.clear() }
                 Button("填中心块") { model.fillCenters() }
             }

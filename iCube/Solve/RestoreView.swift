@@ -8,14 +8,21 @@ import CubeSolve
 /// 录入有两条路：手动点格子，或者拍照识别。拍照那条走 `ScanView`，
 /// 认出来的状态灌进同一个 `RestoreModel`，回到录入页给用户复核——识别再准
 /// 也可能有光线捣乱，最后一眼必须由人过。
+///
+/// 阶数由练习页的全局设置传进来（练习/教程/还原共用同一个开关），
+/// 录入格子数、引导框切格、识别算法全都跟着它走。
 struct RestoreView: View {
     @Environment(\.dismiss) private var dismiss
 
-    @State private var model = RestoreModel()
+    @State private var model: RestoreModel
     @State private var path: [SolutionPayload] = []
     @State private var isScanning = false
     /// 拍照识别回来时带的把握度提醒。只提醒不拦截——回录入手改一格比重拍六个面便宜。
     @State private var scanHint: String?
+
+    init(size: Int) {
+        _model = State(initialValue: RestoreModel(size: size))
+    }
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -35,9 +42,10 @@ struct RestoreView: View {
         }
         .tint(.orange)
         .fullScreenCover(isPresented: $isScanning) {
-            ScanView { state, hint in
-                model.load(state: state)
-                scanHint = hint
+            ScanView(size: model.size) { result in
+                // 偶数阶可能拼出不止一种（两个面互为旋转），候选一并带过来让用户挑
+                model.load(candidates: result.candidates)
+                scanHint = result.hint
             }
         }
     }

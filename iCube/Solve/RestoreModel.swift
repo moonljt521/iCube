@@ -25,7 +25,7 @@ extension CubeSolveError {
     var userMessage: String {
         switch self {
         case .unsupportedSize(let size):
-            "\(size) 阶暂时不支持求解，请录入三阶"
+            "\(size) 阶还原助手正在开发中，目前支持 2 阶和 3 阶"
         case .illegalState:
             "这个状态在物理上不可能：单独翻转一条棱、单独拧一个角，或两块互换了位置都会这样。请检查有没有填错格子"
         case .solverUnavailable:
@@ -36,22 +36,27 @@ extension CubeSolveError {
             "没找到解，请检查填色是否正确"
         case .unparsableSolution:
             "求解结果无法识别，请重试"
+        case .selfCheckFailed:
+            "算出来的解没能还原魔方，这是程序内部的问题。请把这一步的操作反馈给我们"
         }
     }
 }
 
 /// 拍照/手动还原的状态录入模型。
 ///
-/// 只管"54 个格子填了什么"以及由此推出的状态、校验与求解结果；
-/// 拍照识别（后续）会以同样的方式往 `stickers` 里写值，所以这里不假设输入来自手点。
+/// 只管"6N² 个格子填了什么"以及由此推出的状态、校验与求解结果；
+/// 拍照识别会以同样的方式往 `stickers` 里写值，所以这里不假设输入来自手点。
 @MainActor
 @Observable
 final class RestoreModel {
 
-    /// 每种颜色在三阶上恰好 9 个
-    static let countPerColor = 9
+    /// 阶数。2/3/4，由调用方按全局设置传进来
+    let size: Int
 
-    /// 54 个贴纸槽位的填色，下标与 `faceletIndex(face:row:col:)` 一致；nil = 还没填
+    /// 每种颜色恰好 N² 个
+    var countPerColor: Int { size * size }
+
+    /// 6N² 个贴纸槽位的填色，下标与 `faceletIndex(face:row:col:size:)` 一致；nil = 还没填
     private(set) var stickers: [CubeColor?]
 
     /// 当前画笔；nil 表示橡皮（擦掉格子）
@@ -72,23 +77,28 @@ final class RestoreModel {
     private(set) var failure: CubeSolveError?
     private(set) var isSolving = false
 
-    init() {
-        stickers = Array(repeating: nil, count: FaceletNotation.length)
+    init(size: Int = 3) {
+        self.size = size
+        stickers = Array(repeating: nil, count: 6 * size * size)
         fillCenters()
     }
+
+    /// 该阶数有没有"真正的中心块"（奇数阶才有，偶数阶的中心块会换面、不是锚点）
+    var hasFixedCenters: Bool { size % 2 == 1 }
 
     // MARK: - 单格读写
 
     func color(at face: Face, row: Int, col: Int) -> CubeColor? {
-        stickers[faceletIndex(face, row: row, col: col)]
+        stickers[faceletIndex(face, row: row, col: col, size: size)]
     }
 
     func paint(_ color: CubeColor?, at face: Face, row: Int, col: Int) {
-        let index = faceletIndex(face, row: row, col: col)
+        let index = faceletIndex(face, row: row, col: col, size: size)
         // 拖动会反复扫过同一格，值没变就别作废已有的求解结果
         guard stickers[index] != color else { return }
         stickers[index] = color
         invalidateSolution()
+        forgetCandidates()
     }
 
     func paint(at face: Face, row: Int, col: Int) {
@@ -97,29 +107,35 @@ final class RestoreModel {
 
     // MARK: - 批量
 
-    /// 六个中心块必然互异，是整套配色的锚点，先按标准配色（白顶/黄底/绿前/蓝后/红右/橙左）填好。
-    /// 用户把魔方按这个朝向摆好，就只需填 48 个非中心格。
+    /// 奇数阶：六个中心块必然互异，是整套配色的锚点，先按标准配色（白顶/黄底/绿前/蓝后/红右/橙左）填好。
+    /// 用户把魔方按这个朝向摆好，就只需填 6N²−6 个非中心格。
+    ///
+    /// 偶数阶没有固定中心块，一个都不填——填了反而是错的。
     func fillCenters() {
+        guard hasFixedCenters else { return }
+        let mid = (size - 1) / 2
         for face in Face.allCases {
-            stickers[faceletIndex(face, row: 1, col: 1)] = face.defaultColor
+            stickers[faceletIndex(face, row: mid, col: mid, size: size)] = face.defaultColor
         }
         invalidateSolution()
+        forgetCandidates()
     }
 
     func clear() {
-        stickers = Array(repeating: nil, count: FaceletNotation.length)
+        stickers = Array(repeating: nil, count: 6 * size * size)
         invalidateSolution()
+        forgetCandidates()
     }
 
     /// 用一整个状态覆盖当前填色。
-    /// 拍照识别拿到 54 格结果后走这里；测试也用它造输入。
+    /// 拍照识别拿到 6N² 格结果后走这里；测试也用它造输入。
     func load(state: CubeState) {
-        guard state.size == 3 else { return }
+        guard state.size == size else { return }
         var next: [CubeColor?] = []
-        next.reserveCapacity(FaceletNotation.length)
+        next.reserveCapacity(stickers.count)
         for face in Face.allCases {
-            for row in 0..<3 {
-                for col in 0..<3 {
+            for row in 0..<size {
+                for col in 0..<size {
                     next.append(state.color(at: face, row: row, col: col))
                 }
             }
@@ -127,6 +143,60 @@ final class RestoreModel {
         stickers = next
         invalidateSolution()
     }
+
+    // MARK: - 多种拼法（只对偶数阶可能出现）
+
+    /// 识别出来的全部候选拼法，已按贴纸序列排序（确定性）。三阶恒为 1 个。
+    ///
+    /// 偶数阶没有固定中心块，**两个不同的面互为 90° 旋转时，照片分不出谁是谁**——
+    /// 实测二阶约一成状态会拼出两个解，而且用求解器验过：两个解都是真能拧出来的状态，
+    /// 不是判据放水。这时候硬选一个是拿用户的魔方赌运气，所以候选留给用户挑。
+    private(set) var candidates: [CubeState] = []
+    private(set) var candidateIndex = 0
+
+    /// 有没有得挑
+    var hasCandidateChoices: Bool { candidates.count > 1 }
+
+    /// 换成下一种拼法
+    func cycleCandidate() {
+        guard hasCandidateChoices else { return }
+        candidateIndex = (candidateIndex + 1) % candidates.count
+        load(state: candidates[candidateIndex])
+    }
+
+    /// 灌入一次识别的全部候选
+    func load(candidates: [CubeState]) {
+        guard let first = candidates.first else { return }
+        self.candidates = candidates
+        candidateIndex = 0
+        load(state: first)
+    }
+
+    // MARK: - 整体转向（只对偶数阶有意义）
+
+    /// 把当前状态整体转一下，用来把识别结果的朝向拧到跟手上一致。
+    ///
+    /// ## 为什么需要用户自己转
+    ///
+    /// 偶数阶没有固定中心块，**同一颗魔方的 24 种整体旋转全都是合法状态**，
+    /// 而六个面是分别拍的、空间朝向在照片里丢失了——所以"哪面朝上"这件事
+    /// 从输入里根本恢复不出来，算法只能挑一个确定的代表（见
+    /// `CubeState.rotationallyCanonical`）。用户看到的就是"颜色对但整体转了"。
+    ///
+    /// 与其让算法猜，不如给两个按钮让用户拧到自己满意——他一眼就知道对不对，
+    /// 算法永远猜不到。`.y` 与 `.x` 两个方向能张成全部 24 种朝向。
+    ///
+    /// ## 三阶不能用
+    ///
+    /// 三阶的中心块锚定了朝向，整体旋转会把中心块挪走，状态就不再是面位记法认的那一串，
+    /// 求解器会直接拒掉。所以这里挡一道，三阶调用是空操作。
+    func rotate(by move: Move) {
+        guard size != 3, move.kind.isWholeCube, let current = state else { return }
+        load(state: current.applying(move))
+    }
+
+    /// 该不该给用户显示"转向"按钮：偶数阶、且格子已经填满（没填满就没有"状态"可转）
+    var canRotate: Bool { size != 3 && isComplete }
 
     // MARK: - 校验
 
@@ -141,14 +211,14 @@ final class RestoreModel {
         var counts: [CubeColor: Int] = [:]
         for color in stickers.compactMap({ $0 }) { counts[color, default: 0] += 1 }
         return CubeColor.allCases.compactMap { color in
-            let delta = Self.countPerColor - (counts[color] ?? 0)
+            let delta = countPerColor - (counts[color] ?? 0)
             return delta == 0 ? nil : ColorOffset(color: color, delta: delta)
         }
     }
 
-    /// 填满且每色 9 个才允许求解。
+    /// 填满、每色 N² 个、且阶数有求解器（目前 2/3 阶）才允许求解。
     /// 更深的合法性（棱角朝向和、奇偶性）交给求解器判——它本来就会校验，不必在这里重写一遍。
-    var canSolve: Bool { isComplete && colorOffsets.isEmpty }
+    var canSolve: Bool { isComplete && colorOffsets.isEmpty && size <= 3 }
 
     /// 拼成的状态；没填满时为 nil
     var state: CubeState? {
@@ -164,6 +234,9 @@ final class RestoreModel {
             return colorOffsets
                 .map { $0.delta > 0 ? "\($0.color.displayName)还差 \($0.delta)" : "\($0.color.displayName)多了 \(-$0.delta)" }
                 .joined(separator: " · ")
+        }
+        if size > 3 {
+            return "\(size) 阶还原助手正在开发中，目前支持 2 阶和 3 阶"
         }
         return "已填满，可以求解"
     }
@@ -196,6 +269,12 @@ final class RestoreModel {
         solution = nil
         solvedState = nil
         failure = nil
+    }
+
+    /// 用户自己动过格子了，识别的候选拼法就作废——他已经在用手改，别再让"换拼法"把改动盖掉
+    private func forgetCandidates() {
+        candidates.removeAll()
+        candidateIndex = 0
     }
 }
 

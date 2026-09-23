@@ -7,7 +7,7 @@ import SwiftTB2PKit
 /// 底层求解库的 `TB2PError` 不直接暴露给上层——它是 vendor 进来的第三方类型，
 /// 换实现就会变。这里把它的语义翻译成本项目自己的错误面。
 public enum CubeSolveError: Error, Equatable, Sendable {
-    /// 面位记法只定义在三阶，其他阶数没有可用的求解器。
+    /// 只有 2/3 阶有求解器。四阶要先做降阶（中心归位 + 翼棱配对），尚未实现。
     case unsupportedSize(Int)
 
     /// 该状态在物理上不可能：单角翻转、单棱翻转、两角互换等。
@@ -27,6 +27,10 @@ public enum CubeSolveError: Error, Equatable, Sendable {
     /// 求解库返回了本项目的记法解析器读不懂的解。
     /// 正常不会发生，一旦出现说明两边约定脱节了。
     case unparsableSolution(String)
+
+    /// 二阶走的是"嵌入三阶"的路子（见 `CubeSolve.solveTwoByTwo`），
+    /// 解出来之后会拿原状态自检一遍。自检不过说明映射写错了，是实现 bug，不是用户的问题。
+    case selfCheckFailed(notation: String)
 }
 
 /// 一次求解的结果。
@@ -49,11 +53,11 @@ public struct CubeSolution: Hashable, Sendable {
     public static let alreadySolved = CubeSolution(algorithm: Algorithm([]), notation: "")
 }
 
-/// 三阶魔方求解器。
+/// 魔方求解器（2 阶与 3 阶）。
 ///
-/// 内部是 vendor 进 `Vendor/SwiftTB2PKit` 的 Kociemba 两阶段算法实现。
-/// 这一层只做三件事：把 `CubeState` 译成面位串、把底层错误译成本项目的错误、
-/// 把结果译回 `Algorithm`。
+/// 三阶内部是 vendor 进 `Vendor/SwiftTB2PKit` 的 Kociemba 两阶段算法实现；
+/// 二阶没有单独的求解器，走**嵌入三阶**的路子（见下）。这一层只做三件事：
+/// 把 `CubeState` 译成面位串、把底层错误译成本项目的错误、把结果译回 `Algorithm`。
 ///
 /// ## 调用姿势
 ///
@@ -100,7 +104,7 @@ public enum CubeSolve {
     /// 求还原步骤。
     ///
     /// - Parameters:
-    ///   - state: 待求解的状态。必须是三阶。
+    ///   - state: 待求解的状态。支持 2 阶与 3 阶；四阶还没有求解器（要先做降阶）。
     ///   - maxLength: 解的长度上限。底层按深度迭代加深，返回搜到的第一个解。
     ///     调大只会让"搜不到"的兜底更宽松，不会让解更长。
     ///   - timeout: 搜索时间上限（秒）。
@@ -123,16 +127,48 @@ public enum CubeSolve {
     ///
     /// 随机打乱的解长 20~24 步、平均约 22.6，符合两阶段算法的常规口径。
     /// 真要从"离还原只差一步"的状态拿到那一步，得另加优化层，目前不做。
+    ///
+    /// 二阶同理不保证最优（二阶最优解不超过 11 步，这里会给出 20 步上下）。
     public static func solve(
         _ state: CubeState,
         maxLength: Int = 25,
         timeout: TimeInterval = 5
     ) throws -> CubeSolution {
-        guard state.size == 3, let facelets = state.faceletString else {
+        switch state.size {
+        case 3:
+            guard let facelets = state.faceletString else {
+                throw CubeSolveError.unsupportedSize(state.size)
+            }
+            guard !state.isSolved else { return .alreadySolved }
+            return try solve(facelets: facelets, maxLength: maxLength, timeout: timeout)
+        case 2:
+            return try solveTwoByTwo(state, maxLength: maxLength, timeout: timeout)
+        default:
             throw CubeSolveError.unsupportedSize(state.size)
         }
-        guard !state.isSolved else { return .alreadySolved }
+    }
 
+    /// 便捷重载：直接吃面位串。
+    ///
+    /// 主要给测试和调试用——正常路径应该从 `CubeState` 进来。
+    public static func solve(
+        faceletString: String,
+        maxLength: Int = 25,
+        timeout: TimeInterval = 5
+    ) throws -> CubeSolution {
+        guard let state = CubeState(faceletString: faceletString) else {
+            throw CubeSolveError.illegalState(reason: "面位串无法解析：\(faceletString)")
+        }
+        return try solve(state, maxLength: maxLength, timeout: timeout)
+    }
+
+    // MARK: - 三阶
+
+    private static func solve(
+        facelets: String,
+        maxLength: Int,
+        timeout: TimeInterval
+    ) throws -> CubeSolution {
         try prepare()
 
         let solver: TB2PSolver
@@ -162,18 +198,100 @@ public enum CubeSolve {
         return CubeSolution(algorithm: algorithm, notation: raw)
     }
 
-    /// 便捷重载：直接吃面位串。
+    // MARK: - 二阶：嵌入三阶
+
+    /// 二阶求解：把它的角状态**嵌进一个"棱与中心都还原"的三阶**，交给同一个 Kociemba，
+    /// 拿到的转动序列对二阶同样成立。
     ///
-    /// 主要给测试和调试用——正常路径应该从 `CubeState` 进来。
-    public static func solve(
-        faceletString: String,
-        maxLength: Int = 25,
-        timeout: TimeInterval = 5
+    /// ## 为什么成立
+    ///
+    /// 三阶的转动作用在角块上的效果与二阶的同名转动**逐格一致**（都是把那一层转 90°，
+    /// 角块跟着走）。Kociemba 只吐外层转动（`U R F D L B` 及其逆/双），没有中层切片，
+    /// 所以解出来的序列施加到二阶上，角块一定被还原。
+    ///
+    /// ## 为什么不用先摆正朝向
+    ///
+    /// 二阶没有固定中心块，同一颗魔方的 24 种整体旋转都是合法状态。嵌入时按槽位一一对应
+    /// 拷贝即可，不需要（也没法）先把魔方"摆正"——反正解会把角块归位。
+    ///
+    /// ## 奇偶性的坑
+    ///
+    /// 三阶要求"角置换奇偶 == 棱置换奇偶"，而二阶**没有棱**，角置换的奇偶是自由的。
+    /// 所以角置换为奇的那一半状态，直接嵌入会得到一个非法的三阶。修法是把 U 层的两条棱
+    /// 对调：棱置换变成奇的，与角对上；**必须挑同一层的两条棱**，跨层互换会连带改变
+    /// 棱朝向和，反而弄出个 `.edgeFlipSum`（`CubeLegalityTests` 已钉住这一点）。
+    private static func solveTwoByTwo(
+        _ state: CubeState,
+        maxLength: Int,
+        timeout: TimeInterval
     ) throws -> CubeSolution {
-        guard let state = CubeState(faceletString: faceletString) else {
-            throw CubeSolveError.illegalState(reason: "面位串无法解析：\(faceletString)")
+        guard !state.isSolved else { return .alreadySolved }
+        guard let embedded = embeddedInThreeByThree(state) else {
+            throw CubeSolveError.illegalState(reason: "二阶状态拼不出可解的三阶")
         }
-        return try solve(state, maxLength: maxLength, timeout: timeout)
+        let solution = try solve(
+            facelets: embedded.faceletString!,
+            maxLength: maxLength,
+            timeout: timeout
+        )
+
+        // 自检：把解施加回二阶必须真能还原。嵌入法只要有一处映射写错，
+        // 解就会"看起来合理但拧不回去"——这条自检把错误挡在这里，而不是留给用户。
+        guard state.applying(solution.algorithm).isSolved else {
+            throw CubeSolveError.selfCheckFailed(notation: solution.notation)
+        }
+        return solution
+    }
+
+    /// 2 阶状态 → 一个三阶状态：角块按槽位一一对应拷过去，棱与中心保持还原态。
+    /// 角置换为奇时把 U 层两条棱对调凑合法；拼不出合法三阶时返回 nil。
+    private static func embeddedInThreeByThree(_ state: CubeState) -> CubeState? {
+        guard state.size == 2 else { return nil }
+        var stickers = CubeState.solved(size: 3).stickers
+
+        // 2 阶的角块中心在 {±1}³，三阶的在 {±2}³，法向一一对应
+        for x in [-1, 1] {
+            for y in [-1, 1] {
+                for z in [-1, 1] {
+                    let source = V3(x, y, z)
+                    let target = V3(2 * x, 2 * y, 2 * z)
+                    for normal in [V3(x, 0, 0), V3(0, y, 0), V3(0, 0, z)] {
+                        guard let from = StickerGeometry.index(cubieCenter: source, facing: normal, size: 2),
+                              let to = StickerGeometry.index(cubieCenter: target, facing: normal, size: 3)
+                        else { return nil }
+                        stickers[to] = state.stickers[from]
+                    }
+                }
+            }
+        }
+
+        let embedded = CubeState(stickers: stickers)
+        if embedded.isLegalState { return embedded }
+        guard case .permutationParity = embedded.legality else { return nil }
+        let patched = swappingUpLayerEdges(embedded)
+        return patched.isLegalState ? patched : nil
+    }
+
+    /// 对调 U 层的前后两条棱（UF ↔ UB）。同层互换不改变棱朝向和，只翻置换奇偶。
+    private static func swappingUpLayerEdges(_ state: CubeState) -> CubeState {
+        let first = edgeFaceletIndices((0, 1, 1))
+        let second = edgeFaceletIndices((0, 1, -1))
+        var stickers = state.stickers
+        for offset in 0..<2 {
+            let buffer = stickers[first[offset]]
+            stickers[first[offset]] = stickers[second[offset]]
+            stickers[second[offset]] = buffer
+        }
+        return CubeState(stickers: stickers)
+    }
+
+    /// 三阶某个棱块（符号三元组里恰有一个 0）的两个贴纸下标，次序按 (x, y, z) 过滤后的自然次序。
+    /// 次序必须两侧一致，"对调两条棱"才是把整块搬过去、而不是只换一张贴纸。
+    private static func edgeFaceletIndices(_ signs: (Int, Int, Int)) -> [Int] {
+        let center = V3(2 * signs.0, 2 * signs.1, 2 * signs.2)
+        return [V3(signs.0, 0, 0), V3(0, signs.1, 0), V3(0, 0, signs.2)]
+            .filter { $0 != .zero }
+            .map { StickerGeometry.index(cubieCenter: center, facing: $0, size: 3)! }
     }
 
     // MARK: - 错误翻译

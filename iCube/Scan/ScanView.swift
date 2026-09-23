@@ -157,9 +157,10 @@ struct ScanView: View {
     }
 
     private func hint(geometry: ScanGeometry, size: CGSize) -> some View {
-        Text(model.duplicateHint ? "这一面已经拍过了" : "把一面魔方填满方框")
+        Text(model.duplicateHint ?? "把一面魔方填满方框")
             .font(.footnote.weight(.medium))
-            .foregroundStyle(model.duplicateHint ? Color.red : .white)
+            .foregroundStyle(model.duplicateHint == nil ? Color.white : Color.red)
+            .multilineTextAlignment(.center)
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
             .background(.black.opacity(0.55), in: Capsule())
@@ -214,16 +215,26 @@ struct ScanView: View {
     private func miniGrid(_ samples: [LabColor]) -> some View {
         GeometryReader { proxy in
             let side = min(proxy.size.width, proxy.size.height) / 3
-            ZStack(alignment: .topLeading) {
-                ForEach(0..<min(9, samples.count), id: \.self) { index in
-                    Rectangle()
-                        .fill(samples[index].uiColor)
-                        .frame(width: side, height: side)
-                        .offset(x: CGFloat(index % 3) * side, y: CGFloat(index / 3) * side)
+            // 用 VStack/HStack 让网格**自身撑开**成 side*3 见方。
+            //
+            // 之前是 ZStack + 逐格 `.offset`，那是错的：`offset` 不参与布局，ZStack
+            // 的布局尺寸只有 side*side，于是外层 `.frame(side*3, side*3)` 把这个小块
+            // **居中**放进大框，左上角被推到 (side, side)——九格再从这里 offset 展开，
+            // 右下角就冲出槽位了。
+            VStack(spacing: 0) {
+                ForEach(0..<3, id: \.self) { row in
+                    HStack(spacing: 0) {
+                        ForEach(0..<3, id: \.self) { column in
+                            let index = row * 3 + column
+                            Rectangle()
+                                .fill(index < samples.count ? samples[index].uiColor : Color.clear)
+                        }
+                    }
                 }
             }
             .frame(width: side * 3, height: side * 3)
-            .position(x: proxy.size.width / 2, y: proxy.size.height / 2)
+            // 再撑满一层，把这块居中对齐到槽位里
+            .frame(width: proxy.size.width, height: proxy.size.height)
         }
         .padding(3)
     }

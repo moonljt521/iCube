@@ -79,8 +79,11 @@ final class ScanModel {
     private(set) var liveSamples: [LabColor]?
     /// 已拍的面
     private(set) var captures: [FaceCapture] = []
-    /// 拍到重复面时的提示；下一次拍成功、或者重拍/清空时清掉
-    private(set) var duplicateHint = false
+    /// 拍到重复面时的提示；下一次拍成功、或者重拍/清空时清掉。
+    ///
+    /// 带上是和第几面撞的、差多少——只说"拍过了"没法区分"屏幕没翻页"和
+    /// "取景偏了采到背景"，这两种要采取的行动完全不同。
+    private(set) var duplicateHint: String?
     /// 显示朝向下的画面尺寸（竖），界面靠它算引导框
     private(set) var videoSize: CGSize = .zero
     /// 界面回填的视图尺寸
@@ -230,16 +233,19 @@ final class ScanModel {
         let capture = FaceCapture(samples: samples)
 
         // 同一个面拍两遍是最常见的失误。当场拦下来，比等六个面拍完再报错强得多。
-        if let center = capture.center,
-           captures.contains(where: {
-               ($0.center?.distance(to: center) ?? .infinity) < StickerClassifier.duplicateCenterDistance
-           }) {
-            duplicateHint = true
-            return
+        if let center = capture.center {
+            for (index, existing) in captures.enumerated() {
+                guard let other = existing.center else { continue }
+                let distance = other.distance(to: center)
+                if distance < StickerClassifier.duplicateCenterDistance {
+                    duplicateHint = "中心色和第 \(index + 1) 面几乎一样（差 \(String(format: "%.1f", distance))）"
+                    return
+                }
+            }
         }
 
         captures.append(capture)
-        duplicateHint = false
+        duplicateHint = nil
         if isFull { analyse() }
     }
 
@@ -248,7 +254,7 @@ final class ScanModel {
         guard !captures.isEmpty, phase != .analysing else { return }
         captures.removeLast()
         phase = .scanning
-        duplicateHint = false
+        duplicateHint = nil
     }
 
     /// 六个面全部重拍
@@ -256,7 +262,7 @@ final class ScanModel {
         guard phase != .analysing else { return }
         captures.removeAll()
         phase = .scanning
-        duplicateHint = false
+        duplicateHint = nil
     }
 
     // MARK: - 识别

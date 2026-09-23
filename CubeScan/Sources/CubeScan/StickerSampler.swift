@@ -118,18 +118,24 @@ public enum StickerSampler {
         return result
     }
 
-    /// 引导框里第 index 格（row-major）的采样矩形，归一化坐标
+    /// 引导框里第 index 格（row-major）的采样矩形，归一化坐标。
+    ///
+    /// 两个方向必须**分开算步长**。归一化坐标里 x 和 y 的尺度不一样（帧是 1280×720
+    /// 这种非正方形的），引导框在像素上是正方形，落到归一化坐标就成了 0.46×0.82 的
+    /// 长方形。这里要是拿 `guide.width` 去走 y 方向，网格会被纵向压扁：引导框越"高"
+    /// （竖屏帧越明显），漏采越多——1280×720 的帧上九格只铺满引导框上方 56%，
+    /// 最下面一行贴纸从来没被采到过，中间那行的采样还横跨两行贴纸。
     public static func cellRect(in guide: CGRect, index: Int, inset: Double = 0.18) -> CGRect {
         let row = index / 3
         let col = index % 3
-        let side = guide.width / 3
+        let cellWidth = guide.width / 3
+        let cellHeight = guide.height / 3
         let cell = CGRect(
-            x: guide.minX + CGFloat(col) * side,
-            y: guide.minY + CGFloat(row) * side,
-            width: side,
-            height: side
+            x: guide.minX + CGFloat(col) * cellWidth,
+            y: guide.minY + CGFloat(row) * cellHeight,
+            width: cellWidth,
+            height: cellHeight
         )
-        let shrink = CGFloat(inset) * side
-        return cell.insetBy(dx: shrink, dy: shrink)
+        return cell.insetBy(dx: CGFloat(inset) * cellWidth, dy: CGFloat(inset) * cellHeight)
     }
 }

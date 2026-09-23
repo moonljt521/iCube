@@ -151,6 +151,87 @@ final class StickerSamplerTests: XCTestCase {
         XCTAssertEqual(inset.midY, full.midY, accuracy: 1e-9)
     }
 
+    /// 回归：引导框在归一化坐标里**不是正方形**（帧 1280×720，引导框在像素上是正方形）。
+    /// 九格必须照样铺满引导框。曾经拿 `guide.width` 去走 y 方向，网格纵向被压扁——
+    /// 1280×720 的帧上九格只铺满引导框上方 56%，最下面一行贴纸从来没被采到过。
+    func test_cellRectsTileANonSquareGuide() {
+        let guide = CGRect(x: 0.2694, y: 0.09, width: 0.4612, height: 0.82)
+        var rects: [CGRect] = []
+        for index in 0..<9 { rects.append(StickerSampler.cellRect(in: guide, index: index, inset: 0)) }
+
+        let total = rects.reduce(0.0) { $0 + $1.width * $1.height }
+        XCTAssertEqual(total, guide.width * guide.height, accuracy: 1e-9, "九格没铺满引导框")
+        XCTAssertEqual(rects[0].origin.x, guide.minX, accuracy: 1e-9)
+        XCTAssertEqual(rects[0].origin.y, guide.minY, accuracy: 1e-9)
+        XCTAssertEqual(rects[8].maxX, guide.maxX, accuracy: 1e-9)
+        XCTAssertEqual(rects[8].maxY, guide.maxY, accuracy: 1e-9, "纵向没铺到底")
+        for (first, a) in rects.enumerated() {
+            for b in rects[(first + 1)...] {
+                XCTAssertFalse(a.intersects(b), "格子重叠了")
+            }
+        }
+    }
+
+    /// 端到端回归：真机链路是 `guideRectInFrame` → `sampleGrid`，两边必须落在同一块区域。
+    ///
+    /// 造一张 1280×720 的帧，在**引导框真正落到的位置**上按手算的三等分画九块纯色，
+    /// 采出来的九格要一一对上。图案刻意用独立于 `cellRect` 的算式铺——不然测试和被测
+    /// 代码一起错，反而测不出来。
+    func test_gridSamplingReadsTheCellsWhereTheGuideActuallyIs() {
+        let frame = CGSize(width: 1280, height: 720)
+        let geometry = ScanGeometry(videoSize: CGSize(width: 720, height: 1280),
+                                    viewSize: CGSize(width: 390, height: 844))
+        let guide = geometry.guideRectInFrame(frameSize: frame)
+
+        let width = Int(frame.width)
+        let height = Int(frame.height)
+        // 底色挑一个和调色板都拉得开的灰，采偏了必然露馅
+        var bytes = [UInt8](repeating: 0, count: width * height * 4)
+        for offset in stride(from: 0, to: bytes.count, by: 4) {
+            bytes[offset] = 200
+            bytes[offset + 1] = 200
+            bytes[offset + 2] = 200
+            bytes[offset + 3] = 255
+        }
+
+        let palette: [(UInt8, UInt8, UInt8)] = [
+            (255, 0, 0), (0, 255, 0), (0, 0, 255),
+            (255, 255, 0), (0, 255, 255), (255, 0, 255),
+            (255, 255, 255), (0, 0, 0), (128, 128, 128),
+        ]
+        // 手算三等分，不借 cellRect
+        let x0 = guide.minX * frame.width
+        let y0 = guide.minY * frame.height
+        let cellWidth = guide.width * frame.width / 3
+        let cellHeight = guide.height * frame.height / 3
+        for index in 0..<9 {
+            let row = index / 3
+            let col = index % 3
+            let left = Int((x0 + CGFloat(col) * cellWidth).rounded())
+            let top = Int((y0 + CGFloat(row) * cellHeight).rounded())
+            let right = Int((x0 + CGFloat(col + 1) * cellWidth).rounded())
+            let bottom = Int((y0 + CGFloat(row + 1) * cellHeight).rounded())
+            for y in top..<bottom {
+                for x in left..<right {
+                    let offset = (y * width + x) * 4
+                    bytes[offset] = palette[index].2
+                    bytes[offset + 1] = palette[index].1
+                    bytes[offset + 2] = palette[index].0
+                }
+            }
+        }
+
+        let samples = withView(bytes, width: width, height: height) {
+            StickerSampler.sampleGrid($0, normalizedGuide: guide)
+        }
+        XCTAssertNotNil(samples)
+        for index in 0..<9 {
+            let expected = LabColor(byteRed: palette[index].0, green: palette[index].1, blue: palette[index].2)
+            XCTAssertLessThan(samples![index].distance(to: expected), 10,
+                              "第 \(index) 格采到的不是它自己那块：\(samples![index]) vs \(expected)")
+        }
+    }
+
     func test_gridSamplingReadsNineDistinctCells() {
         // 一张 3×3 拼接图：每格纯色，格与格之间 6 像素黑缝
         let cell = 30

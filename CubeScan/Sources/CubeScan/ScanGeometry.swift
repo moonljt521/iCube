@@ -52,18 +52,22 @@ public struct ScanGeometry: Hashable, Sendable {
 
     /// 第 index 格（row-major，0 是左上）在视图坐标里的**采样区域**。
     /// 已经按 `inset` 向内收缩——贴着格子边缘采会吃到贴纸之间的黑色塑料。
+    ///
+    /// 这里两个方向分开算步长，和 `StickerSampler.cellRect` 保持一致。`guideRect`
+    /// 本身是正方形，分开算与合并算结果相同；但合并算是个陷阱——换个非正方形的
+    /// 引导框就会静默压扁，而这类"坐标算错一格"的 bug 在真机上极难发现。
     public func cellRect(_ index: Int, inset: Double = 0.18) -> CGRect {
         let row = index / 3
         let col = index % 3
-        let side = guideRect.width / 3
+        let cellWidth = guideRect.width / 3
+        let cellHeight = guideRect.height / 3
         let cell = CGRect(
-            x: guideRect.minX + CGFloat(col) * side,
-            y: guideRect.minY + CGFloat(row) * side,
-            width: side,
-            height: side
+            x: guideRect.minX + CGFloat(col) * cellWidth,
+            y: guideRect.minY + CGFloat(row) * cellHeight,
+            width: cellWidth,
+            height: cellHeight
         )
-        let shrink = CGFloat(inset) * side
-        return cell.insetBy(dx: shrink, dy: shrink)
+        return cell.insetBy(dx: CGFloat(inset) * cellWidth, dy: CGFloat(inset) * cellHeight)
     }
 
     /// 视图坐标 → 归一化视频坐标

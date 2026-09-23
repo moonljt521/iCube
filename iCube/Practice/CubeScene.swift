@@ -108,8 +108,9 @@ final class CubeScene {
     private var turns: [TurnHandle: ActiveTurn] = [:]
     private var nextHandleID = 0
     private var pending: [(move: Move, duration: Double, completion: () -> Void)] = []
-    /// 重建场景时自增：让上一代在飞的动画回调作废，不会去烘焙已经换掉的一批块
-    private var generation = 0
+    /// 重建场景时自增：让上一代在飞的动画回调作废，不会去烘焙已经换掉的一批块。
+    /// 外部（演示模型）也读它——在飞的 `play` 返回后靠它判断这一步到底落没落到画面上
+    private(set) var generation = 0
 
     private let bodyMesh: MeshResource
     private let stickerMesh: MeshResource
@@ -509,6 +510,37 @@ final class CubeScene {
             let normal = node.rotation.applying(to: owner.localNormal)
             guard let slot = StickerGeometry.index(cubieCenter: node.center, facing: normal, size: size) else { return nil }
             return StickerPose(buildSlot: owner.buildSlot, currentSlot: slot)
+        }
+    }
+
+    /// 逐片贴纸按**渲染实体**的实际变换反推它此刻落在哪个槽位、是什么颜色。
+    ///
+    /// `stickerPoses` 走的是 `node.rotation` 这个**逻辑量**——它只证明"逻辑上该转的都转了"，
+    /// 证明不了"上屏的就是它"。上屏的几何是 `container.position/orientation` 加上贴纸的
+    /// 局部偏移，所以这里从实体反推：容器位置 ÷ `unit` 得块中心，容器朝向作用在贴纸
+    /// 局部位置上得世界法向。两条路径对账一致，才等于"画面 = 状态"。
+    func renderedStickerSlots() -> [(color: CubeColor, slot: Int)] {
+        stickerEntries.compactMap { entry in
+            guard let owner = owners[ObjectIdentifier(entry.entity)] else { return nil }
+            let node = cubies[owner.cubie]
+            let position = node.container.position
+            let center = V3(Int((position.x / unit).rounded()),
+                            Int((position.y / unit).rounded()),
+                            Int((position.z / unit).rounded()))
+            let offset = node.container.orientation.act(entry.entity.position)
+            // 取最大分量定轴向：容器朝向来自四元数，带浮点残差，
+            // 逐分量取符号会把 (0.131, 1e-8, -1e-8) 误判成 (1, 1, -1)。
+            let ax = abs(offset.x), ay = abs(offset.y), az = abs(offset.z)
+            let normal: V3
+            if ax >= ay && ax >= az {
+                normal = V3(offset.x > 0 ? 1 : -1, 0, 0)
+            } else if ay >= az {
+                normal = V3(0, offset.y > 0 ? 1 : -1, 0)
+            } else {
+                normal = V3(0, 0, offset.z > 0 ? 1 : -1)
+            }
+            guard let slot = StickerGeometry.index(cubieCenter: center, facing: normal, size: size) else { return nil }
+            return (entry.color, slot)
         }
     }
 

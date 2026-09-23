@@ -8,6 +8,7 @@ struct PracticeView: View {
     @Query(sort: \SolveRecord.startedAt, order: .reverse) private var records: [SolveRecord]
     @AppStorage(MaterialCache.defaultsKey) private var skinID = CubeSkin.classic.id
     @AppStorage(TurnSoundPlayer.defaultsKey) private var soundOn = true
+    @State private var showingRestore = false
 
     var body: some View {
         VStack(spacing: 12) {
@@ -30,10 +31,18 @@ struct PracticeView: View {
         .onChange(of: skinID) { _, newValue in
             model.scene.applySkin(MaterialCache.skin(id: newValue))
         }
+        .fullScreenCover(isPresented: $showingRestore) { RestoreView() }
     }
 
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .topBarLeading) {
+            Button {
+                showingRestore = true
+            } label: {
+                Label("还原", systemImage: "wand.and.stars")
+            }
+        }
         ToolbarItem(placement: .topBarTrailing) {
             Menu {
                 Picker("阶数", selection: Binding(

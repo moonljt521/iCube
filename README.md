@@ -30,6 +30,14 @@ An iOS speedcubing practice app built with SwiftUI and RealityKit. It supports 2
 - Every case is verified by unit tests (case = solved state + inverse of the algorithm, so playing the algorithm always solves it)
 - The demonstration model follows the global cube size and current skin
 
+### Restore assistant
+
+- **Manual entry**: paint the standard unfolded net cell by cell — tap or drag to brush continuously. The six centers come pre-filled with the standard color scheme, so only 48 cells are left
+- **Live validation**: cell count and per-color counts are reported as you go; solving unlocks only once the net is full and balanced
+- **Short solutions**: Kociemba two-phase algorithm — typically 20–24 moves for a random scramble, roughly 26 ms per solve
+- **Text + animated steps**: a numbered step strip highlights and auto-scrolls as the animation plays, with replay, reset, and three speed settings
+- Illegal states (a single flipped edge, a single twisted corner, a parity error) are rejected by the solver with a plain-language explanation
+
 ## Tech Stack & Architecture
 
 | Layer | Technology |
@@ -75,11 +83,12 @@ iCube/
 ├── Vendor/
 │   └── SwiftTB2PKit/        # Third-party Kociemba two-phase solver (MIT); see VENDORED.md
 ├── iCube/                   # Application layer
-│   ├── Practice/            # Practice tab: scene, gestures, timer, skins
+│   ├── Practice/            # Practice tab: scene, gestures, timer, skins, demo board
+│   ├── Solve/               # Restore assistant: net entry, solving, step playback
 │   ├── Tutorial/            # Tutorial: data, demo model, views
 │   ├── Stats/               # Solve records and statistics
 │   └── Assets.xcassets/     # App icon and other assets
-├── iCubeTests/              # App-layer unit tests (40 tests)
+├── iCubeTests/              # App-layer unit tests (65 tests)
 └── Tools/                   # Asset generation scripts (see below)
 ```
 
@@ -146,7 +155,7 @@ xcodebuild test -project iCube.xcodeproj -scheme iCube \
 
 - **CubeKit (96 tests)**: geometry and sticker-index invariants, turn-permutation correctness across all supported sizes, notation parse round-trips, size-dependent wide-move semantics, scramble solvability and interval rules, color-count conservation under random multi-size turning, facelet-string round-trips
 - **CubeSolve (13 tests)**: end-to-end solvability of random scrambles, rejection of illegal states (single flipped edge / single twisted corner), rejection of non-3×3 sizes, solution-string reparse consistency, solutions restricted to outer face turns
-- **App layer (40 tests)**: gesture intent arbitration (including back-facing hit filtering), scene construction and sticker reconciliation, per-case tutorial validation, and the practice-session state machine
+- **App layer (65 tests)**: gesture intent arbitration (including back-facing hit filtering), scene construction and sticker reconciliation, per-case tutorial validation, the practice-session state machine, net coordinate mapping, and the restore-entry paint / validate / solve flow end to end
 
 ## Implementation Notes
 

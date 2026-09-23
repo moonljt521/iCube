@@ -2,11 +2,13 @@ import Foundation
 import Observation
 import CubeKit
 
-/// 教程演示：持有自己的 CubeScene，负责"摆案型 / 播放公式"两个动作。
-/// 与练习页的 PracticeModel 互不干扰——教程魔方不计步、不开计时。
+/// 演示用魔方模型：持有自己的 CubeScene，负责"摆状态 / 播放公式"两件事。
+///
+/// 与练习页的 `PracticeModel` 互不干扰——这里不计步、不开计时。
+/// 教程的案型演示与还原步骤页的动画都复用它。
 @MainActor
 @Observable
-final class TutorialCubeModel {
+final class CubeDemoModel {
 
     enum Speed: String, CaseIterable, Identifiable {
         case slow = "慢速"
@@ -26,7 +28,7 @@ final class TutorialCubeModel {
 
     let scene: CubeScene
     private(set) var state: CubeState
-    /// 正在演示的公式步下标（用于高亮公式字块），空闲时为 nil
+    /// 正在播放的公式步下标（用于高亮公式字块），空闲时为 nil
     private(set) var currentMoveIndex: Int?
     private(set) var isPlaying = false
     var speed: Speed = .normal
@@ -38,14 +40,19 @@ final class TutorialCubeModel {
         self.scene = CubeScene(state: state)
     }
 
-    /// 把魔方摆成案型：还原态先施加公式的逆（保持当前阶数）
-    func loadCase(algorithm: Algorithm) {
+    /// 直接摆到某个状态
+    func load(state: CubeState) {
         stop()
-        state = CubeState.solved(size: state.size).applying(algorithm.inverse)
+        self.state = state
         scene.rebuild(state: state)
     }
 
-    /// 从案型出发播放公式本体，结束时应为还原态
+    /// 把魔方摆成案型：还原态先施加公式的逆（保持当前阶数）
+    func loadCase(algorithm: Algorithm) {
+        load(state: CubeState.solved(size: state.size).applying(algorithm.inverse))
+    }
+
+    /// 从当前状态出发播放公式
     func play(_ algorithm: Algorithm) {
         stop()
         guard !algorithm.moves.isEmpty else { return }

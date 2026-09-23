@@ -17,7 +17,8 @@ struct RestoreView: View {
     @State private var model: RestoreModel
     @State private var path: [SolutionPayload] = []
     @State private var isScanning = false
-    /// 拍照识别回来时带的把握度提醒。只提醒不拦截——回录入手改一格比重拍六个面便宜。
+    @State private var isVideoScanning = false
+    /// 识别回来时带的把握度提醒。只提醒不拦截——回录入手改一格比重拍六个面便宜。
     @State private var scanHint: String?
 
     init(size: Int) {
@@ -26,7 +27,12 @@ struct RestoreView: View {
 
     var body: some View {
         NavigationStack(path: $path) {
-            FaceEntryView(model: model, onScan: { isScanning = true }, scanHint: $scanHint) { state, solution in
+            FaceEntryView(
+                model: model,
+                onScan: { isScanning = true },
+                onVideoScan: { isVideoScanning = true },
+                scanHint: $scanHint
+            ) { state, solution in
                 path.append(SolutionPayload(state: state, solution: solution))
             }
             .navigationTitle("还原")
@@ -44,6 +50,13 @@ struct RestoreView: View {
         .fullScreenCover(isPresented: $isScanning) {
             ScanView(size: model.size) { result in
                 // 偶数阶可能拼出不止一种（两个面互为旋转），候选一并带过来让用户挑
+                model.load(candidates: result.candidates)
+                scanHint = result.hint
+            }
+        }
+        .fullScreenCover(isPresented: $isVideoScanning) {
+            VideoScanView(size: model.size) { result in
+                // 与拍照识别同一条出路：候选一并带过来，用户对照魔方挑
                 model.load(candidates: result.candidates)
                 scanHint = result.hint
             }

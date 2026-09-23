@@ -86,12 +86,12 @@ final class ScanFlowTests: XCTestCase {
     func test_confidenceHintOnlyFiresBelowThreshold() {
         let threshold = ClassifiedFaces.lowConfidenceThreshold
 
-        XCTAssertNil(ScanModel.confidenceHint(margin: threshold),
+        XCTAssertNil(ScanAnalysis.confidenceHint(margin: threshold),
                      "恰好等于阈值不该提醒——语义是「低于才提醒」")
-        XCTAssertNil(ScanModel.confidenceHint(margin: threshold + 1),
+        XCTAssertNil(ScanAnalysis.confidenceHint(margin: threshold + 1),
                      "明显有把握却给了提醒，会变成天天弹的噪音")
 
-        let hint = ScanModel.confidenceHint(margin: 2.5)
+        let hint = ScanAnalysis.confidenceHint(margin: 2.5)
         XCTAssertNotNil(hint, "低于阈值却没提醒，这个信号等于白算")
         XCTAssertTrue(hint?.contains("2.5") == true,
                       "提醒里没带把握度数值，用户不知道差多少：\(hint ?? "nil")")
@@ -135,7 +135,7 @@ final class ScanFlowTests: XCTestCase {
         for size in [2, 3, 4] {
             // 用 L 当标记：每个采样点一个可区分的值
             let samples = (0..<(size * size)).map { LabColor(l: Double($0), a: 0, b: 0) }
-            let display = ScanModel.reorderedForDisplay(samples, size: size)
+            let display = ScanAnalysis.reorderedForDisplay(samples, size: size)
 
             XCTAssertEqual(display.count, samples.count)
             XCTAssertEqual(Set(display.map(\.l)).count, size * size, "\(size) 阶重排后不是双射")
@@ -145,7 +145,7 @@ final class ScanFlowTests: XCTestCase {
             XCTAssertEqual(display[0].l, samples[(size - 1) * size].l, "\(size) 阶重排方向不对")
             // 拧四次回到原样
             var current = samples
-            for _ in 0..<4 { current = ScanModel.reorderedForDisplay(current, size: size) }
+            for _ in 0..<4 { current = ScanAnalysis.reorderedForDisplay(current, size: size) }
             XCTAssertEqual(current.map(\.l), samples.map(\.l), "\(size) 阶拧四次没回到原样")
         }
     }
@@ -205,12 +205,12 @@ final class ScanFlowTests: XCTestCase {
         var colors: [Face: [CubeColor]] = [:]
         for face in Face.allCases { colors[face] = Array(repeating: face.defaultColor, count: 16) }
 
-        let clean = ScanModel.assemblyFailureMessage(colors: colors, size: 4)
+        let clean = ScanAnalysis.assemblyFailureMessage(colors: colors, size: 4)
         XCTAssertTrue(clean.contains("颜色数看着都对"), "色数正常时该说别的：\(clean)")
 
         // 改一格：白少一个、红多一个
         colors[.u]?[0] = .red
-        let message = ScanModel.assemblyFailureMessage(colors: colors, size: 4)
+        let message = ScanAnalysis.assemblyFailureMessage(colors: colors, size: 4)
         XCTAssertTrue(message.contains("白 15 格"), "该点出白少了几格：\(message)")
         XCTAssertTrue(message.contains("红 17 格"), "该点出红多了几格：\(message)")
         XCTAssertTrue(message.contains("16 格"), "该说清本该多少格：\(message)")
@@ -257,9 +257,9 @@ final class ScanFlowTests: XCTestCase {
 
     /// 歧义提醒只在真的多解时说话
     func test_ambiguityHintOnlyFiresWhenThereAreChoices() {
-        XCTAssertNil(ScanModel.ambiguityHint(count: 1), "只有一种拼法不该提醒")
-        XCTAssertNil(ScanModel.ambiguityHint(count: 0))
-        let hint = ScanModel.ambiguityHint(count: 2)
+        XCTAssertNil(ScanAnalysis.ambiguityHint(count: 1), "只有一种拼法不该提醒")
+        XCTAssertNil(ScanAnalysis.ambiguityHint(count: 0))
+        let hint = ScanAnalysis.ambiguityHint(count: 2)
         XCTAssertNotNil(hint)
         XCTAssertTrue(hint?.contains("换拼法") == true, "提醒里得说清下一步做什么：\(hint ?? "nil")")
     }

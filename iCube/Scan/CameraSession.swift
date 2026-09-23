@@ -38,6 +38,37 @@ final class CameraSession: NSObject {
     private var isConfigured = false
     private var isFailed = false
 
+    // MARK: - 录制（视频识别用）
+
+    /// 视频文件输出。视频识别要录一段"转一圈展示六个面"的素材。
+    ///
+    /// 与取景用的 `AVCaptureVideoDataOutput` 并存：录制期间预览照常工作，
+    /// 用户能看着画面对准魔方。
+    private let movieOutput = AVCaptureMovieFileOutput()
+    private var recordingCompletion: ((URL?) -> Void)?
+
+    var isRecording: Bool { movieOutput.isRecording }
+
+    /// 开始录到 `url`。已在录、或会话还没配好时什么都不做
+    func startRecording(to url: URL) {
+        queue.async { [self] in
+            guard isConfigured, !movieOutput.isRecording else { return }
+            movieOutput.startRecording(to: url, recordingDelegate: self)
+        }
+    }
+
+    /// 停止录制，回调录出来的文件；没在录或失败时给 nil
+    func stopRecording(completion: @escaping (URL?) -> Void) {
+        queue.async { [self] in
+            guard movieOutput.isRecording else {
+                DispatchQueue.main.async { completion(nil) }
+                return
+            }
+            recordingCompletion = completion
+            movieOutput.stopRecording()
+        }
+    }
+
     /// 相机可用（模拟器上没有，用于界面上给出可读的说明）
     static var isAvailable: Bool {
         AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back) != nil
@@ -106,11 +137,29 @@ final class CameraSession: NSObject {
         guard session.canAddOutput(output) else { return .cannotAddOutput }
         session.addOutput(output)
 
+        // 录制输出加不上不算致命——取景/拍照那条路还能用，只是视频识别录不了
+        if session.canAddOutput(movieOutput) {
+            session.addOutput(movieOutput)
+        }
+
         // 刻意**不**设置输出连接的方向。理由见 `ScanGeometry.guideRectInFrame`：
         // 引导框是居中的正方形，绕中心转 90° 不影响它，格子次序整体转一下
         // `FaceletAssembler` 会摆正。少一处能算错的地方。
         isConfigured = true
         return nil
+    }
+}
+
+extension CameraSession: AVCaptureFileOutputRecordingDelegate {
+    func fileOutput(
+        _ output: AVCaptureFileOutput,
+        didFinishRecordingTo outputFileURL: URL,
+        from connections: [AVCaptureConnection],
+        error: Error?
+    ) {
+        let completion = recordingCompletion
+        recordingCompletion = nil
+        DispatchQueue.main.async { completion?(error == nil ? outputFileURL : nil) }
     }
 }
 

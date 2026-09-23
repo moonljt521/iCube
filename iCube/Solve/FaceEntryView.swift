@@ -10,6 +10,8 @@ import CubeSolve
 struct FaceEntryView: View {
     let model: RestoreModel
     let onScan: () -> Void
+    /// 视频识别入口：录一段或选一段展示六个面的视频，自动挑面识别
+    let onVideoScan: () -> Void
     /// 拍照识别回来时把握度不够的提醒；nil 表示够有把握（或还没拍过）
     ///
     /// 必须排在 `onSolved` **前面**：`onSolved` 是尾随闭包，得是成员逐一构造器的
@@ -70,24 +72,37 @@ struct FaceEntryView: View {
     // MARK: - 拍照入口
 
     private var scanEntry: some View {
-        Button(action: onScan) {
-            HStack(spacing: 10) {
-                Image(systemName: "camera.viewfinder")
-                    .font(.system(size: 20))
+        HStack(spacing: 10) {
+            entry(icon: "camera.viewfinder", title: "拍照识别", subtitle: "六个面各拍一张", action: onScan)
+            entry(icon: "video", title: "视频识别", subtitle: "转一圈自动读", action: onVideoScan)
+        }
+        .disabled(model.isSolving)
+    }
+
+    private func entry(
+        icon: String,
+        title: String,
+        subtitle: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 9) {
+                Image(systemName: icon)
+                    .font(.system(size: 18))
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("拍照识别")
+                    Text(title)
                         .font(.subheadline.weight(.semibold))
-                    Text("六个面各拍一张，自动读出当前状态")
+                    Text(subtitle)
                         .font(.caption2)
                         .foregroundStyle(.white.opacity(0.7))
                 }
                 Spacer(minLength: 0)
                 Image(systemName: "chevron.right")
-                    .font(.caption)
+                    .font(.caption2)
                     .foregroundStyle(.white.opacity(0.5))
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 14)
+            .padding(.horizontal, 12)
             .padding(.vertical, 10)
         }
         .buttonStyle(.plain)
@@ -97,7 +112,6 @@ struct FaceEntryView: View {
             RoundedRectangle(cornerRadius: 12)
                 .strokeBorder(Color.orange.opacity(0.5), lineWidth: 1)
         }
-        .disabled(model.isSolving)
         .padding(.top, 4)
     }
 

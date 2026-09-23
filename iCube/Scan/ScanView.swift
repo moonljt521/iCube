@@ -16,10 +16,10 @@ struct ScanView: View {
 
     @State private var model: ScanModel
 
-    /// 识别成功：把结果交出去（状态 + 全部候选 + 提醒），见 `ScanModel.ScanResult`。
-    let onFinished: (ScanModel.ScanResult) -> Void
+    /// 识别成功：把结果交出去（状态 + 全部候选 + 提醒），见 `ScanResult`。
+    let onFinished: (ScanResult) -> Void
 
-    init(size: Int, onFinished: @escaping (ScanModel.ScanResult) -> Void) {
+    init(size: Int, onFinished: @escaping (ScanResult) -> Void) {
         _model = State(initialValue: ScanModel(size: size))
         self.onFinished = onFinished
     }

@@ -60,6 +60,15 @@ final class RestoreModel {
     var isErasing: Bool { brush == nil }
 
     private(set) var solution: CubeSolution?
+    /// 与 `solution` **配对**的那份状态，即算这份解时用的那一份。
+    ///
+    /// 求解是异步的（典型 26ms，最坏到 5s 超时），这段时间录入界面仍然可交互：
+    /// 涂格子、填中心块、或者从拍照页灌一份新状态进来，都会把 `solution` 清掉，
+    /// 但求解完成时的赋值又会把它写回来。于是"此刻的 stickers"可能已经不是
+    /// "算这份解时的状态"——两者错开一格，演示播完就停在"差一格还原"的画面上，
+    /// 页脚既不显示「已还原」也不显示步数，用户看到的就是"红色面上多了个白色"。
+    /// 所以状态和解绑成一对存，调用方只认这一对。
+    private(set) var solvedState: CubeState?
     private(set) var failure: CubeSolveError?
     private(set) var isSolving = false
 
@@ -166,12 +175,16 @@ final class RestoreModel {
         isSolving = true
         failure = nil
         solution = nil
+        solvedState = nil
         defer { isSolving = false }
         do {
             // 求解是同步且吃 CPU 的（典型 26ms，最坏到 timeout），丢到主线程外跑
-            solution = try await Task.detached(priority: .userInitiated) {
+            let result = try await Task.detached(priority: .userInitiated) {
                 try CubeSolve.solve(state)
             }.value
+            // 和 `state` 一起存：中途可能有人改了 stickers，那份解对"此刻"不成立
+            solution = result
+            solvedState = state
         } catch let error as CubeSolveError {
             failure = error
         } catch {
@@ -181,6 +194,7 @@ final class RestoreModel {
 
     private func invalidateSolution() {
         solution = nil
+        solvedState = nil
         failure = nil
     }
 }

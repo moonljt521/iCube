@@ -58,6 +58,7 @@ struct FaceEntryView: View {
             RoundedRectangle(cornerRadius: 12)
                 .strokeBorder(Color.orange.opacity(0.5), lineWidth: 1)
         }
+        .disabled(model.isSolving)
         .padding(.top, 4)
     }
 
@@ -83,6 +84,9 @@ struct FaceEntryView: View {
             .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
             .contentShape(Rectangle())
             .gesture(paintGesture(layout: layout))
+            // 求解在飞的时候锁住录入：解只对发起时那份状态成立，
+            // 中途改一格就会让"解"和"状态"错开（详见 `RestoreModel.solvedState`）
+            .disabled(model.isSolving)
         }
         .aspectRatio(CGFloat(CubeNetLayout.faceColumns) / CGFloat(CubeNetLayout.faceRows), contentMode: .fit)
     }
@@ -163,6 +167,7 @@ struct FaceEntryView: View {
 
             Spacer(minLength: 0)
         }
+        .disabled(model.isSolving)
     }
 
     // MARK: - 状态与操作
@@ -180,6 +185,7 @@ struct FaceEntryView: View {
             .font(.footnote)
             .buttonStyle(.plain)
             .foregroundStyle(.orange)
+            .disabled(model.isSolving)
 
             if let failure = model.failure {
                 Label(failure.userMessage, systemImage: "exclamationmark.triangle.fill")
@@ -194,7 +200,9 @@ struct FaceEntryView: View {
         Button {
             Task {
                 await model.solve()
-                if let state = model.state, let solution = model.solution {
+                // 用配对的那份状态，不是"此刻"的 stickers——求解期间录入界面
+                // 可能被改过（旧版本没锁），两者错开一格就会演出非法配色
+                if let state = model.solvedState, let solution = model.solution {
                     onSolved(state, solution)
                 }
             }

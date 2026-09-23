@@ -196,4 +196,30 @@ final class RestoreModelTests: XCTestCase {
         XCTAssertNil(model.failure)
         XCTAssertFalse(model.isSolving)
     }
+
+    /// 解必须和**发起求解时**那份状态配对。
+    ///
+    /// 求解是异步的（典型 26ms，最坏到 5s 超时），这段时间录入界面在旧版本里仍可交互：
+    /// 涂一格会 `invalidateSolution()` 把 `solution` 清掉，而求解完成时的赋值又把它
+    /// 写回来——于是"此刻的 stickers"和"算这份解时的状态"错开一格。演示页若读"此刻"
+    /// 的那份去播解，就会停在"差一格还原"的画面上：每色不再是 9 片（用户看到的就是
+    /// "红色面上多了个白色"），页脚既不显示「已还原」也不显示步数。
+    func test_solutionIsPairedWithTheStateItWasSolvedFrom() async throws {
+        let scrambled = Scramble.random(length: 20, seed: 7).initialState
+        let model = RestoreModel()
+        model.load(state: scrambled)
+        XCTAssertTrue(model.canSolve)
+
+        let solving = Task { await model.solve() }
+        await Task.yield()                       // 让求解跑到 await，进入"在飞"状态
+        model.paint(.white, at: .r, row: 0, col: 0)   // 用户这时又涂了一格
+        await solving.value
+
+        let solution = try XCTUnwrap(model.solution, "解不该被中途那一下涂色吃掉")
+        let paired = try XCTUnwrap(model.solvedState, "解必须带着它算自的那份状态")
+        XCTAssertEqual(paired, scrambled, "配对的是发起求解时那份，不是涂过之后那份")
+        XCTAssertNotEqual(model.state, paired, "中途涂色确实改了当前状态")
+        XCTAssertEqual(paired.applying(solution.algorithm), .solved,
+                       "调用方拿到的这一对必须自洽：拿配对那份去播解一定回还原态")
+    }
 }

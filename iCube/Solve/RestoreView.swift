@@ -20,6 +20,8 @@ struct RestoreView: View {
     @State private var isVideoScanning = false
     /// 识别回来时带的把握度提醒。只提醒不拦截——回录入手改一格比重拍六个面便宜。
     @State private var scanHint: String?
+    /// 视频识别失败——必须带到录入页显示（红色条），不然用户关掉识别页就什么都不知道了
+    @State private var scanError: String?
 
     init(size: Int) {
         _model = State(initialValue: RestoreModel(size: size))
@@ -31,11 +33,12 @@ struct RestoreView: View {
                 model: model,
                 onScan: { isScanning = true },
                 onVideoScan: { isVideoScanning = true },
-                scanHint: $scanHint
+                scanHint: $scanHint,
+                scanError: $scanError
             ) { state, solution in
                 path.append(SolutionPayload(state: state, solution: solution))
             }
-            .navigationTitle("还原")
+            .navigationTitle("还原 · \(model.size) 阶")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -55,11 +58,18 @@ struct RestoreView: View {
             }
         }
         .fullScreenCover(isPresented: $isVideoScanning) {
-            VideoScanView(size: model.size) { result in
-                // 与拍照识别同一条出路：候选一并带过来，用户对照魔方挑
-                model.load(candidates: result.candidates)
-                scanHint = result.hint
-            }
+            VideoScanView(
+                size: model.size,
+                onFinished: { result in
+                    // 与拍照识别同一条出路：候选一并带过来，用户对照魔方挑
+                    model.load(candidates: result.candidates)
+                    scanHint = result.hint
+                },
+                onFailed: { message in
+                    // 失败消息必须带回来——不然关掉本页就丢了
+                    scanError = message
+                }
+            )
         }
     }
 }

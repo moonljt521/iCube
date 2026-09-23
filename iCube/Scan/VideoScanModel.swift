@@ -90,6 +90,9 @@ final class VideoScanModel {
     private(set) var foundCount = 0
 
     @ObservationIgnored var onFinished: ((ScanResult) -> Void)?
+    /// 失败也回调到外面，不然用户关掉识别页就什么都看不到了——
+    /// 4 阶偶数阶识别成功率本身就比奇数阶低，必须把失败带到录入页让用户看到
+    @ObservationIgnored var onFailed: ((String) -> Void)?
 
     init(size: Int = 3) {
         self.size = size
@@ -113,7 +116,9 @@ final class VideoScanModel {
 
         foundCount = collected.count
         guard collected.count == ScanModel.faceCount else {
-            phase = .failed(Self.shortageMessage(found: collected.count))
+            let message = Self.shortageMessage(found: collected.count)
+            phase = .failed(message)
+            onFailed?(message)
             return
         }
 
@@ -127,6 +132,7 @@ final class VideoScanModel {
             onFinished?(result)
         case .failed(let message):
             phase = .failed(message)
+            onFailed?(message)
         }
     }
 

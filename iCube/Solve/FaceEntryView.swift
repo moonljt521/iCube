@@ -17,12 +17,16 @@ struct FaceEntryView: View {
     /// 必须排在 `onSolved` **前面**：`onSolved` 是尾随闭包，得是成员逐一构造器的
     /// 最后一个参数，否则调用处 `FaceEntryView(...) { state, solution in }` 绑不上。
     @Binding var scanHint: String?
+    /// 视频识别失败——必须比 `scanHint`（黄色"把握不大"）更醒目，不然用户关掉
+    /// 识别页就完全不知道发生了什么
+    @Binding var scanError: String?
     let onSolved: (CubeState, CubeSolution) -> Void
 
     var body: some View {
         VStack(spacing: 14) {
             scanEntry
             scanWarning
+            scanErrorBanner
             candidateSwitcher
             hint
             Spacer(minLength: 0)
@@ -35,6 +39,23 @@ struct FaceEntryView: View {
         .padding(.horizontal, 16)
         .padding(.bottom, 12)
         .background(Color(white: 0.05).ignoresSafeArea())
+    }
+
+    /// 显式 init：`@Binding` 不会自动获得默认值，得由调用方传 `$state`。
+    init(
+        model: RestoreModel,
+        onScan: @escaping () -> Void,
+        onVideoScan: @escaping () -> Void,
+        scanHint: Binding<String?>,
+        scanError: Binding<String?>,
+        onSolved: @escaping (CubeState, CubeSolution) -> Void
+    ) {
+        self.model = model
+        self.onScan = onScan
+        self.onVideoScan = onVideoScan
+        self._scanHint = scanHint
+        self._scanError = scanError
+        self.onSolved = onSolved
     }
 
     // MARK: - 多种拼法
@@ -73,8 +94,8 @@ struct FaceEntryView: View {
 
     private var scanEntry: some View {
         HStack(spacing: 10) {
-            entry(icon: "camera.viewfinder", title: "拍照识别", subtitle: "六个面各拍一张", action: onScan)
-            entry(icon: "video", title: "视频识别", subtitle: "转一圈自动读", action: onVideoScan)
+            entry(icon: "camera.viewfinder", title: "拍照识别", subtitle: "用 \(model.size) 阶魔方 · 拍六个面", action: onScan)
+            entry(icon: "video", title: "视频识别", subtitle: "用 \(model.size) 阶魔方 · 转一圈", action: onVideoScan)
         }
         .disabled(model.isSolving)
     }
@@ -148,6 +169,39 @@ struct FaceEntryView: View {
             .overlay {
                 RoundedRectangle(cornerRadius: 10)
                     .strokeBorder(Color.yellow.opacity(0.35), lineWidth: 1)
+            }
+        }
+    }
+
+    /// 视频识别失败——红色，比 `scanWarning` 严重，因为它意味着识别页关了
+    /// 之后用户就什么都不知道了，所以录入页必须能继续告诉他发生了什么。
+    @ViewBuilder
+    private var scanErrorBanner: some View {
+        if let scanError {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.footnote)
+                Text(scanError)
+                    .font(.footnote)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Button {
+                    self.scanError = nil
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.caption2.weight(.semibold))
+                        .padding(4)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("关掉这条错误")
+            }
+            .foregroundStyle(.red)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .background(Color.red.opacity(0.14), in: RoundedRectangle(cornerRadius: 10))
+            .overlay {
+                RoundedRectangle(cornerRadius: 10)
+                    .strokeBorder(Color.red.opacity(0.4), lineWidth: 1)
             }
         }
     }

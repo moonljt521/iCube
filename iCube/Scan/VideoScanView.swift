@@ -25,10 +25,14 @@ struct VideoScanView: View {
 
     /// 识别成功：把结果交出去（状态 + 全部候选 + 提醒），见 `ScanResult`
     let onFinished: (ScanResult) -> Void
+    /// 识别失败：把错误消息交出去，必须让用户在录入页也看得到——
+    /// 否则他关掉本页就什么都不知道了
+    let onFailed: (String) -> Void
 
-    init(size: Int, onFinished: @escaping (ScanResult) -> Void) {
+    init(size: Int, onFinished: @escaping (ScanResult) -> Void, onFailed: @escaping (String) -> Void) {
         _model = State(initialValue: VideoScanModel(size: size))
         self.onFinished = onFinished
+        self.onFailed = onFailed
     }
 
     var body: some View {
@@ -41,6 +45,10 @@ struct VideoScanView: View {
         .task {
             model.onFinished = { result in
                 onFinished(result)
+                dismiss()
+            }
+            model.onFailed = { message in
+                onFailed(message)
                 dismiss()
             }
             camera.start()

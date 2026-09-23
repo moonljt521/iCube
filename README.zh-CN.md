@@ -38,6 +38,7 @@
 | 3D 渲染 | RealityKit（`RealityView` + 相机内容） |
 | 持久化 | SwiftData（成绩记录）、UserDefaults（皮肤 / 阶数偏好） |
 | 核心算法 | CubeKit（本地 SwiftPM 包） |
+| 魔方求解 | CubeSolve（本地 SwiftPM 包）+ vendored [SwiftTB2PKit](https://github.com/edmw/SwiftTB2PKit) |
 
 ### CubeKit 内核设计
 
@@ -53,14 +54,26 @@ CubeKit 是与应用层完全解耦的纯 Swift 算法包，无 UIKit / RealityK
 - **场景复用**：同阶状态变化走场景内重建，换阶重建整个场景；材质按皮肤分桶缓存，换肤零重建成本
 - **碰撞体约束**：贴纸碰撞体采用"整格覆盖、与表面齐平"策略，规避透视下误触邻面的经典问题
 
+### 求解层设计
+
+CubeSolve 是夹在 CubeKit 与第三方求解库之间的一层薄适配，只做三件事：把 `CubeState` 译成 Kociemba 面位串、把底层错误译成本项目的错误面、把结果译回 `Algorithm`。求解算法本身由 vendor 进 `Vendor/SwiftTB2PKit` 的 Kociemba 两阶段实现提供。
+
+- **面位约定**：外部记法面顺序为 `U R F D L B`，本项目 `Face` 的 rawValue 顺序是 `u d f b r l`，两者块顺序不同而每面内部的行列读法一致，故映射只是一次块重排
+- **崩溃隔离**：底层 `TB2P.tables` 加载失败即 `fatalError`，调用方无法捕获。`CubeSolve.isAvailable` 先查资源是否在包内，缺失时抛错降级，不会把宿主 App 崩掉
+- **表文件生命周期**：21MB 查找表由 `prepare()` 从 bundle 拷进 Caches 再加载。iOS 会清 Caches，所以**每次启动都要调**，不能只调一次
+- **不保证最优解**：两阶段算法的剪枝表只是可采纳下界，下界高估时浅层搜索被整段剪掉，解可能长于最优。随机打乱实测 20~24 步、平均 22.6 步
+
 ## 工程结构
 
 ```
 iCube/
 ├── project.yml              # XcodeGen 工程定义（唯一工程事实源）
 ├── CubeKit/                 # 核心算法包（SwiftPM）
-│   ├── Sources/CubeKit/     # 魔方状态 / 转动 / 记法 / 打乱 / 朝向
-│   └── Tests/CubeKitTests/  # 79 条单元测试
+│   ├── Sources/CubeKit/     # 魔方状态 / 转动 / 记法 / 打乱 / 朝向 / 面位编解码
+│   └── Tests/CubeKitTests/  # 96 条单元测试
+├── CubeSolve/               # 求解适配包（SwiftPM），依赖 CubeKit 与 vendor 的求解库
+├── Vendor/
+│   └── SwiftTB2PKit/        # 第三方 Kociemba 两阶段求解器（MIT），改动见 VENDORED.md
 ├── iCube/                   # 应用层
 │   ├── Practice/            # 练习页：场景、手势、计时、皮肤
 │   ├── Tutorial/            # 教程：数据、演示模型、界面
@@ -88,7 +101,7 @@ App 内三条 `turn_*.wav` 取自真实磁吸魔方录音，**无法**由该脚�
 ### 环境要求
 
 - macOS 14+
-- Xcode 16+（含 iOS 18 SDK）
+- Xcode 26+（含 iOS 18 SDK；vendored 求解包的 `swift-tools-version` 为 6.2，需要 Swift 6.2 工具链）
 - [XcodeGen](https://github.com/yonaskolb/XcodeGen)（`brew install xcodegen`）
 - 真机调试需配置开发者签名（修改 `project.yml` 中的 `DEVELOPMENT_TEAM`）
 
@@ -117,15 +130,21 @@ xcodebuild -project iCube.xcodeproj -scheme iCube \
 # CubeKit 算法包测试（macOS 直接跑，最快）
 cd CubeKit && swift test
 
+# CubeSolve 求解测试（端到端：随机打乱 → 求解 → 施加解 → 判定还原）
+cd CubeSolve && swift test
+
 # 全量测试（含应用层，需模拟器）
 xcodebuild test -project iCube.xcodeproj -scheme iCube \
   -destination 'platform=iOS Simulator,name=iPhone 16'
 ```
 
+> 求解相关测试在 debug 构建下慢约 20 倍（`-Onone`），要看真实耗时加 `-c release`。
+
 ## 测试策略
 
-- **CubeKit（79 条）**：几何与贴纸索引不变量、各阶转动置换正确性、层深记法解析往返、宽层多阶展开语义、打乱可还原性与间隔规则、多阶随机转动颜色守恒
-- **应用层（38 条）**：手势意图仲裁（含背向命中过滤）、场景构建与贴纸对账、教程案型/公式逐条校验、练习流程状态机
+- **CubeKit（96 条）**：几何与贴纸索引不变量、各阶转动置换正确性、层深记法解析往返、宽层多阶展开语义、打乱可还原性与间隔规则、多阶随机转动颜色守恒、面位串双向转换
+- **CubeSolve（13 条）**：随机打乱端到端可还原、非法状态（单棱翻转 / 单角扭转）被拒、非三阶被拒、解串重解析一致、解只含外层转动
+- **应用层（40 条）**：手势意图仲裁（含背向命中过滤）、场景构建与贴纸对账、教程案型/公式逐条校验、练习流程状态机
 
 ## 设计细节
 
@@ -136,3 +155,6 @@ xcodebuild test -project iCube.xcodeproj -scheme iCube \
 ## 许可
 
 项目代码版权归作者所有，未附带开源许可协议。
+
+`Vendor/SwiftTB2PKit/` 是第三方代码，按 MIT 许可使用，版权归 Michael Baumgärtner 所有，
+许可全文见 `Vendor/SwiftTB2PKit/LICENSE.md`。

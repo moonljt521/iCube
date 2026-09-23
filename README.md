@@ -38,6 +38,7 @@ An iOS speedcubing practice app built with SwiftUI and RealityKit. It supports 2
 | 3D rendering | RealityKit (`RealityView` + camera content) |
 | Persistence | SwiftData (solve records), UserDefaults (skin / size preferences) |
 | Core algorithms | CubeKit (local SwiftPM package) |
+| Cube solving | CubeSolve (local SwiftPM package) + vendored [SwiftTB2PKit](https://github.com/edmw/SwiftTB2PKit) |
 
 ### CubeKit design
 
@@ -53,14 +54,26 @@ CubeKit is a pure Swift algorithm package, fully decoupled from the app layer wi
 - **Scene reuse**: same-size state changes rebuild in place; switching sizes rebuilds the whole scene; materials are cached per skin, making skin switching essentially free
 - **Collision shape discipline**: sticker collision shapes use a "full-cell coverage, flush with the surface" strategy, avoiding the classic mis-hit problem where perspective exposes neighboring faces
 
+### Solver design
+
+CubeSolve is a thin adapter between CubeKit and a third-party solver. It does exactly three things: encode a `CubeState` as a Kociemba facelet string, translate the underlying errors into this project's error surface, and decode the result back into an `Algorithm`. The algorithm itself comes from the Kociemba two-phase implementation vendored into `Vendor/SwiftTB2PKit`.
+
+- **Facelet convention**: the external notation orders faces as `U R F D L B` while this project's `Face` raw values run `u d f b r l`. Only the block order differs — the row/column reading within each face is identical — so the mapping is a single block reordering
+- **Crash isolation**: the underlying `TB2P.tables` calls `fatalError` on load failure, which callers cannot catch. `CubeSolve.isAvailable` checks the resource is bundled first and throws instead of taking the host app down
+- **Table lifecycle**: the 21 MB lookup table is copied from the bundle into Caches by `prepare()` before loading. iOS purges Caches, so `prepare()` must run **on every launch**, not just once
+- **Not optimal**: the two-phase pruning tables are admissible but loose lower bounds; when one overestimates, entire shallow search levels get pruned and the solution can be longer than optimal. Random scrambles measure 20–24 moves, 22.6 on average
+
 ## Project Layout
 
 ```
 iCube/
 ├── project.yml              # XcodeGen project definition (single source of truth)
 ├── CubeKit/                 # Core algorithm package (SwiftPM)
-│   ├── Sources/CubeKit/     # Cube state / moves / notation / scrambles / orientation
-│   └── Tests/CubeKitTests/  # 79 unit tests
+│   ├── Sources/CubeKit/     # Cube state / moves / notation / scrambles / orientation / facelets
+│   └── Tests/CubeKitTests/  # 96 unit tests
+├── CubeSolve/               # Solver adapter package (SwiftPM), depends on CubeKit + the vendored solver
+├── Vendor/
+│   └── SwiftTB2PKit/        # Third-party Kociemba two-phase solver (MIT); see VENDORED.md
 ├── iCube/                   # Application layer
 │   ├── Practice/            # Practice tab: scene, gestures, timer, skins
 │   ├── Tutorial/            # Tutorial: data, demo model, views
@@ -89,7 +102,7 @@ from a real magnetic-cube recording and are **not** reproducible from this scrip
 ### Requirements
 
 - macOS 14+
-- Xcode 16+ (with the iOS 18 SDK)
+- Xcode 26+ (with the iOS 18 SDK; the vendored solver package declares `swift-tools-version: 6.2` and needs a Swift 6.2 toolchain)
 - [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`)
 - A development team for on-device signing (update `DEVELOPMENT_TEAM` in `project.yml`)
 
@@ -119,14 +132,20 @@ xcodebuild -project iCube.xcodeproj -scheme iCube \
 # CubeKit package tests (runs on macOS directly, fastest)
 cd CubeKit && swift test
 
+# CubeSolve tests (end-to-end: random scramble → solve → apply → assert solved)
+cd CubeSolve && swift test
+
 # Full test suite (includes the app layer; requires a simulator)
 xcodebuild test -project iCube.xcodeproj -scheme iCube \
   -destination 'platform=iOS Simulator,name=iPhone 16'
 ```
 
+> Solver tests are roughly 20× slower in a debug build (`-Onone`). Add `-c release` to see realistic timings.
+
 ## Testing Strategy
 
-- **CubeKit (79 tests)**: geometry and sticker-index invariants, turn-permutation correctness across all supported sizes, notation parse round-trips, size-dependent wide-move semantics, scramble solvability and interval rules, color-count conservation under random multi-size turning
+- **CubeKit (96 tests)**: geometry and sticker-index invariants, turn-permutation correctness across all supported sizes, notation parse round-trips, size-dependent wide-move semantics, scramble solvability and interval rules, color-count conservation under random multi-size turning, facelet-string round-trips
+- **CubeSolve (13 tests)**: end-to-end solvability of random scrambles, rejection of illegal states (single flipped edge / single twisted corner), rejection of non-3×3 sizes, solution-string reparse consistency, solutions restricted to outer face turns
 - **App layer (40 tests)**: gesture intent arbitration (including back-facing hit filtering), scene construction and sticker reconciliation, per-case tutorial validation, and the practice-session state machine
 
 ## Implementation Notes
@@ -138,3 +157,6 @@ xcodebuild test -project iCube.xcodeproj -scheme iCube \
 ## License
 
 Copyright the author. No open-source license is attached.
+
+`Vendor/SwiftTB2PKit/` is third-party code used under the MIT License, copyright
+Michael Baumgärtner. See `Vendor/SwiftTB2PKit/LICENSE.md` for the full text.

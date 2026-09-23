@@ -19,6 +19,8 @@ settings:
 packages:
   CubeKit:
     path: CubeKit
+  CubeSolve:
+    path: CubeSolve
 
 targets:
   iCube:
@@ -39,6 +41,7 @@ targets:
         SUPPORTS_MACCATALYST: NO
     dependencies:
       - package: CubeKit
+      - package: CubeSolve
 
   iCubeTests:
     type: bundle.unit-test
@@ -52,3 +55,4 @@ targets:
     dependencies:
       - target: iCube
       - package: CubeKit
+      - package: CubeSolve

@@ -2,9 +2,9 @@
 xcuserdata/
 *.xcuserstate
 build/
+.build/
 DerivedData/
-CubeKit/.build/
-CubeKit/Package.resolved
+Package.resolved
 *.xcscmblueprint
 iCube.xcodeproj/
 .workbuddy-ai/

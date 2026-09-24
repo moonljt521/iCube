@@ -192,6 +192,20 @@ public enum FaceLocator {
         size: Int,
         contrastThreshold: Double = contrastThreshold
     ) -> LocatedFace? {
+        locateCandidates(buffer, size: size, limit: 1, contrastThreshold: contrastThreshold).first
+    }
+
+    /// 返回同一帧里评分最高的多个框。
+    ///
+    /// 拍照只需要一个最佳框；视频不能只押一个框——魔方倾斜、手指遮挡或一帧里
+    /// 同时露出两面时，最佳候选可能只是“最像颜色的错误区域”。视频挑帧会保留
+    /// 前几个候选，最后用六面合法性反选组合。
+    public static func locateCandidates(
+        _ buffer: PixelBufferView,
+        size: Int,
+        limit: Int = 4,
+        contrastThreshold: Double = contrastThreshold
+    ) -> [LocatedFace] {
         let frameSize = CGSize(width: buffer.width, height: buffer.height)
         var scored: [(guide: CGRect, score: Double)] = []
 
@@ -204,22 +218,39 @@ public enum FaceLocator {
             ) else { continue }
             scored.append((guide, score(samples)))
         }
-        guard let top = scored.map(\.score).max() else { return nil }
+        guard let top = scored.map(\.score).max() else { return [] }
+        let sortedScores = scored.map(\.score).sorted()
+        let median = sortedScores[sortedScores.count / 2]
+        guard top - median >= contrastThreshold else { return [] }
 
-        // 评分打平时取最大的框——见 `tieTolerance`，框偏小比偏大危险得多。
-        let best = scored
-            .filter { $0.score >= top - tieTolerance }
-            .max(by: { area($0.guide, frameSize: frameSize) < area($1.guide, frameSize: frameSize) })!
+        let ranked = scored
+            .filter { $0.score >= top - tieTolerance * 2 }
+            .sorted {
+                if abs($0.score - $1.score) > 0.01 { return $0.score > $1.score }
+                return area($0.guide, frameSize: frameSize) > area($1.guide, frameSize: frameSize)
+            }
 
-        let sorted = scored.map(\.score).sorted()
-        let median = sorted[sorted.count / 2]
-        guard best.score - median >= contrastThreshold else { return nil }
+        var result: [LocatedFace] = []
+        for candidate in ranked.prefix(max(1, limit)) {
+            guard let fine = StickerSampler.sampleGrid(
+                buffer, normalizedGuide: candidate.guide, size: size
+            ) else { continue }
+            result.append(LocatedFace(samples: fine, guide: candidate.guide, score: candidate.score))
+        }
+        return result
+    }
 
-        // 精采样：定位阶段用 8×8 只为了排序，真正喂给分类器的还是 24×24
-        guard let fine = StickerSampler.sampleGrid(
-            buffer, normalizedGuide: best.guide, size: size
-        ) else { return nil }
-        return LocatedFace(samples: fine, guide: best.guide, score: best.score)
+    // MARK: - 阶数探测
+
+    /// 一组采样到最近参考色的**平均**距离。不含多样性奖励。
+    ///
+    /// 跨阶数比较时必须用它而不是 `score`：`score` 含多样性奖励，而格子数不同
+    /// （4/9/16）天然会数出不同种类的颜色，比出来的就不是"阶数对不对"了。
+    public static func meanReferenceDistance(_ samples: [LabColor]) -> Double {
+        guard !samples.isEmpty else { return .infinity }
+        var total = 0.0
+        for sample in samples { total += distanceToNearestReference(sample) }
+        return total / Double(samples.count)
     }
 
     /// 候选引导框，归一化视频坐标。

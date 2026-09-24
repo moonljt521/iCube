@@ -80,7 +80,7 @@ final class VideoScanTests: XCTestCase {
     func test_collectorPicksSixFacesAndRecognisesTheState() throws {
         for size in [2, 3] {
             let truth = Scramble.random(size: size, length: 40, seed: 21).initialState
-            let collector = FaceCollector(size: size)
+            let collector = FaceCollector(size: size, useVision: false)
 
             for face in Face.allCases {
                 guard let buffer = makeFrame(grid: grid(of: truth, face: face), size: size) else {
@@ -133,6 +133,12 @@ final class VideoScanTests: XCTestCase {
         }
         collector.feed(buffer)     // 只出现一帧
         XCTAssertEqual(collector.finish().count, 0, "只停留一帧不该被收成一面")
+    }
+
+    func test_shortageMessageNeverShowsNegativeRemainingFaces() {
+        let message = VideoScanModel.shortageMessage(found: 9, size: 3)
+        XCTAssertFalse(message.contains("还差 -"), "超过 6 个面不能显示负数：\(message)")
+        XCTAssertTrue(message.contains("9 段画面"), "应说明超过 6 段无法确定：\(message)")
     }
 
     /// 同一个面反复展示，只该收一次

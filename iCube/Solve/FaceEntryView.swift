@@ -93,10 +93,12 @@ struct FaceEntryView: View {
     // MARK: - 拍照入口
 
     private var scanEntry: some View {
-        HStack(spacing: 10) {
-            entry(icon: "camera.viewfinder", title: "拍照识别", subtitle: "用 \(model.size) 阶魔方 · 拍六个面", action: onScan)
-            entry(icon: "video", title: "视频识别", subtitle: "用 \(model.size) 阶魔方 · 转一圈", action: onVideoScan)
-        }
+        entry(
+            icon: "camera.viewfinder",
+            title: "拍照识别",
+            subtitle: "用 \(model.size) 阶魔方 · 拍六个面",
+            action: onScan
+        )
         .disabled(model.isSolving)
     }
 
